@@ -1,0 +1,622 @@
+---
+title: "Figures - Appendix B"
+author: "Beauchamp Nathéo"
+date: "2023-11-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r}
+library(targets)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(cowplot)
+library(corrplot)
+library(FactoMineR)
+library(factoextra)
+library(xtable)
+```
+
+
+```{r}
+tar_load(data_growth)
+data_growth <- data_growth %>% 
+  dplyr::filter(!species %in% c("Pinus canariensis", "Pinus radiata"))
+
+tar_load(out_growth)
+tar_load(out_mortality)
+
+tar_load(data_growth_scaled)
+tar_load(data_mortality_scaled)
+```
+
+```{r}
+best_mod_gr <- out_growth %>% 
+  dplyr::group_by(species, sample, fold, mod_id, type_sgdd, type_compet) %>% 
+  dplyr::summarize(aic = weighted.mean(aic, weight)) %>% 
+  dplyr::group_by(species, sample, fold, type_compet) %>% 
+  dplyr::mutate(best_sgdd_mod = which.min(aic) == row_number()) %>% 
+  dplyr::filter(best_sgdd_mod) %>% 
+  dplyr::select(species, sample, fold, mod_id) %>% 
+  dplyr::filter(!species %in% c("Pinus canariensis", "Pinus radiata"))
+
+best_mod_morta <- out_mortality %>% 
+  dplyr::group_by(species, sample, fold, mod_id, type_sgdd, type_compet) %>% 
+  dplyr::summarize(aic = weighted.mean(aic, weight)) %>% 
+  dplyr::group_by(species, sample, fold, type_compet) %>% 
+  dplyr::mutate(best_sgdd_mod = which.min(aic) == row_number()) %>% 
+  dplyr::filter(best_sgdd_mod) %>% 
+  dplyr::select(species, sample, fold, mod_id) %>% 
+  dplyr::filter(!species %in% c("Pinus canariensis", "Pinus radiata"))
+```
+
+```{r}
+data_mean_env <- data_growth %>% 
+  dplyr::group_by(species) %>% 
+  dplyr::summarise(across(c(dbh, aet2pet, sgdd, climate, lci), 
+                          list("mean" = mean, 
+                               "median" = median,
+                               "qt1" = ~quantile(., 0.1),
+                               "qt9" = ~quantile(., 0.9),
+                               "qt025" = ~quantile(., 0.025),
+                               "qt975" = ~quantile(., 0.975)))) %>% 
+  dplyr::filter(!species %in% c("Pinus canariensis", "Pinus radiata")) %>% 
+  dplyr::arrange(aet2pet_median) %>% 
+  dplyr::mutate(species = factor(species, levels = species))
+```
+
+
+# Model performance
+
+## GROWTH
+
+```{r}
+data_rmae <- out_growth %>% 
+  dplyr::right_join(best_mod_gr) %>%
+  dplyr::filter(type_compet == "lci") %>% 
+  dplyr::group_by(species, sample, fold, mod_id) %>% 
+  dplyr::summarize(mae = weighted.mean(mae, weight)) %>% 
+  dplyr::left_join(data_growth %>% 
+                     dplyr::group_by(species) %>% 
+                     dplyr::summarise(range95 = quantile(dD, 0.975) - quantile(dD, 0.025),
+                                      meandD = mean(dD)), 
+                   by = "species") %>% 
+  dplyr::mutate(rmae95 = mae / range95,
+                rmaeMean = mae / meandD)
+
+data_rmae_mean <- data_rmae %>%
+  dplyr::group_by(species) %>%
+  dplyr::summarise(rmae95 = mean(rmae95),
+                   rmaeMean = mean(rmaeMean),
+                   mae = mean(mae),
+                   range95 = mean(range95),
+                   meandD = mean(meandD)) %>%
+  dplyr::arrange(desc(rmae95)) %>%
+  dplyr::mutate(rmae95 = as.character(round(rmae95, 2)))
+
+data_rmae$species <- factor(data_rmae$species, data_rmae_mean$species)
+
+ggplot(data_rmae, aes(y = species, x = rmae95)) +
+  geom_boxplot() +
+  geom_text(data = data_rmae_mean,
+            mapping = aes(x = min(data_rmae$rmae95)-0.005,
+                          label = rmae95),
+            size = 2.5) +
+  labs(title = "Quality of fit of the growth model for each species") +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.y = element_text(size = 6))
+```
+
+
+## SURVIVAL
+
+```{r}
+data_aucroc <- out_mortality %>% 
+  dplyr::right_join(best_mod_morta) %>%
+  dplyr::filter(type_compet == "lci") %>% 
+  dplyr::group_by(species, sample, fold, mod_id) %>% 
+  dplyr::summarize(auc_roc = weighted.mean(auc_roc, weight)) %>% 
+  dplyr::group_by(species) %>% 
+  dplyr::mutate(auc_roc_mean = mean(auc_roc)) %>% 
+  dplyr::arrange(desc(auc_roc_mean)) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::add_row(species="")
+
+data_aucroc_mean <- data_aucroc %>% 
+  dplyr::filter(species!="") %>% 
+  dplyr::group_by(species) %>% 
+  dplyr::summarise(auc_roc = mean(auc_roc)) %>%
+  dplyr::arrange(auc_roc) %>% 
+  dplyr::mutate(auc_roc = as.character(round(auc_roc, 2))) %>% 
+  dplyr::add_row(species="", auc_roc="", .before = 1)
+
+data_aucroc$species <- factor(data_aucroc$species, data_aucroc_mean$species)
+
+text_quality <- data.frame(
+  txt = c("No discrimination", "Unsatisfactory", "Satisfactory", "Good", "Very good", "Excellent"),
+  auc_roc = c(0.45, 0.55, 0.65, 0.75, 0.85, 0.95)
+)
+
+ggplot(data_aucroc, aes(y = species, x = auc_roc)) +
+  geom_boxplot() +
+  geom_vline(xintercept = 0.5, color = "red") +
+  geom_vline(xintercept = 0.6, color = "red") + 
+  geom_vline(xintercept = 0.7, color = "red") +
+  geom_vline(xintercept = 0.8, color = "red") +
+  geom_vline(xintercept = 0.9, color = "red") +
+  geom_text(data = data_aucroc_mean, 
+            mapping = aes(x = min(data_aucroc$auc_roc-0.02, 0.45, na.rm=T), 
+                          label = auc_roc),
+            size = 2.5,
+            nudge_x = -0.01) +
+  labs(title = "Quality of fit of the mortality model for each species") +
+  geom_text(data = text_quality,
+            mapping = aes(x = auc_roc, y = 0, label = txt), 
+            color = "red", size = 2.5,
+            vjust = -0.5) +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.y = element_text(size = 6))
+```
+
+
+# Model predictions
+
+```{r}
+predict_growth <- function(dbh_mm, lci, sgdd, aet2pet, coefs, scales) {
+  
+  # Scale variables
+  # Be careful, sgdd^2 is the square of scaled sgdd
+  dbh <- (dbh_mm - scales$center[scales$var == "dbh"]) / scales$scale[scales$var == "dbh"]
+  dbh_log <- (log(dbh_mm) - scales$center[scales$var == "dbh_log"]) / scales$scale[scales$var == "dbh_log"]
+  
+  lci <- (lci - scales$center[scales$var == "lci"]) / scales$scale[scales$var == "lci"]
+  
+  sgdd_inv <- ((1/sgdd) - scales$center[scales$var == "sgdd_inv"]) / scales$scale[scales$var == "sgdd_inv"]
+  sgdd2 <- ((sgdd - scales$center[scales$var == "sgdd"]) / scales$scale[scales$var == "sgdd"])^2
+  sgdd <- (sgdd - scales$center[scales$var == "sgdd"]) / scales$scale[scales$var == "sgdd"]
+  
+  aet2pet_inv <- ((1/aet2pet) - scales$center[scales$var == "aet2pet_inv"]) / scales$scale[scales$var == "aet2pet_inv"]
+  aet2pet <- (aet2pet - scales$center[scales$var == "aet2pet"]) / scales$scale[scales$var == "aet2pet"]
+  
+  # Compute effect of each variable
+  with(coefs, {
+    
+    # Compute effect of each variable
+    size <- dbh*coef.dbh + dbh_log*coef.dbh_log
+    compet <- lci*coef.lci
+    climate <- sgdd*coef.sgdd + sgdd2*coef.sgdd2 + sgdd_inv*coef.sgdd_inv + aet2pet_inv*coef.aet2pet_inv
+    competXclimate <- lci*aet2pet_inv*coef.aet2pet_inv.lci + lci*sgdd*coef.lci.sgdd + lci*sgdd_inv*coef.lci.sgdd_inv
+
+    # Compute yearly log-increment in mm
+    dD_mm_year_log <- coef.intercept + size + compet + climate + competXclimate
+    
+    # Convert it to yearly increment in mm
+    # CAREFUL ! https://stats.stackexchange.com/questions/115571/back-transforming-regression-results-when-modeling-logy
+    dD_mm_year <- exp(dD_mm_year_log)*exp(coef.sigma^2/2)
+    
+    dD_mm_year
+  })
+  
+}
+
+
+predict_mortality <- function(dbh_mm, lci, sgdd, aet2pet, coefs, scales) {
+  
+  # Scale variables
+  # Be careful, sgdd^2 is the square of scaled sgdd
+  dbh <- (dbh_mm - scales$center[scales$var == "dbh"]) / scales$scale[scales$var == "dbh"]
+  dbh_log <- (log(dbh_mm) - scales$center[scales$var == "dbh_log"]) / scales$scale[scales$var == "dbh_log"]
+  
+  lci <- (lci - scales$center[scales$var == "lci"]) / scales$scale[scales$var == "lci"]
+  
+  sgdd_inv <- ((1/sgdd) - scales$center[scales$var == "sgdd_inv"]) / scales$scale[scales$var == "sgdd_inv"]
+  sgdd2 <- ((sgdd - scales$center[scales$var == "sgdd"]) / scales$scale[scales$var == "sgdd"])^2
+  sgdd <- (sgdd - scales$center[scales$var == "sgdd"]) / scales$scale[scales$var == "sgdd"]
+  
+  aet2pet_inv <- ((1/aet2pet) - scales$center[scales$var == "aet2pet_inv"]) / scales$scale[scales$var == "aet2pet_inv"]
+  aet2pet <- (aet2pet - scales$center[scales$var == "aet2pet"]) / scales$scale[scales$var == "aet2pet"]
+  
+  # Compute effect of each variable
+  with(coefs, {
+    
+    # Compute effect of each variable
+    size <- dbh*coef.dbh + dbh_log*coef.dbh_log
+    compet <- lci*coef.lci
+    climate <- sgdd*coef.sgdd + sgdd2*coef.sgdd2 + sgdd_inv*coef.sgdd_inv + aet2pet_inv*coef.aet2pet_inv
+    competXclimate <- lci*aet2pet_inv*coef.aet2pet_inv.lci + lci*sgdd*coef.lci.sgdd + lci*sgdd_inv*coef.lci.sgdd_inv
+
+    # Compute yearly log-increment in mm
+    theta <- coef.intercept + size + compet + climate + competXclimate
+    
+    # Apply inverse link function (inverse of cloglog)
+    1 - exp( - exp( theta ))
+  })
+  
+}
+```
+
+
+## Growth
+
+### aet2pet X lci
+
+```{r, out.width="150%", out.height="150%"}
+out_growth %>% 
+  dplyr::right_join(best_mod_gr) %>% 
+  dplyr::filter(type_compet == "lci") %>% 
+  dplyr::select(species, sample, fold, mod_id, submod_id, weight,
+                contains("coef."), 
+                -contains(c("pval", "bal", "bat"))) %>% 
+  dplyr::rename_all(~gsub(".est", "", .)) %>% 
+  replace(is.na(.), 0) %>% 
+  dplyr::left_join(data_mean_env, by = "species") %>% 
+  dplyr::slice(rep(1:n(), each = 100*2)) %>% # 2 lci groups
+  dplyr::group_by(species, sample, fold, mod_id, submod_id) %>%
+  dplyr::mutate(x_aet2pet = rep(seq(unique(aet2pet_qt1), unique(aet2pet_qt9),
+                                    length = 100), 
+                                each = 2),
+
+                lci_group = rep(c("in sun", "in shade"), times = 100),
+                
+                lci_value = case_when(
+                  lci_group == "in sun" ~ 0.1,
+                  lci_group == "in shade" ~ 0.9
+                ),
+                lci_group = factor(lci_group, c("in sun", "in shade"))) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(
+    dD = predict_growth(
+      dbh_mean, lci_value, sgdd_mean, x_aet2pet, ., data_growth_scaled$attr)) %>% 
+  dplyr::group_by(species, sample, fold, 
+                  x_aet2pet, lci_group) %>% 
+  dplyr::summarise(dD = weighted.mean(dD, weight)) %>% 
+  dplyr::group_by(species, lci_group, x_aet2pet) %>% 
+  dplyr::summarise(conf.low = quantile(dD, 0.025),
+                   conf.up = quantile(dD, 0.975),
+                   dD = mean(dD)) %>% 
+  dplyr::mutate(species = factor(species, levels = data_mean_env %>% 
+                                   dplyr::arrange(aet2pet_mean) %>% 
+                                   dplyr::pull(species))) %>% 
+  
+  ggplot(aes(y = dD, x = x_aet2pet, color = lci_group)) +
+  scale_color_manual(values = c("goldenrod1", "#595959")) +
+  geom_ribbon(aes(ymin = conf.low,
+                  ymax = conf.up,
+                  group=lci_group),
+              fill = "gray",
+              color = "gray") + 
+  geom_line() +
+  facet_wrap(~species, scales = "free") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        strip.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 45, size = 5),
+        axis.text.y = element_text(size = 5)) +
+  xlab("Water-availability gradient (aet2pet)") +
+  ylab("Annual diameter increment in mm")
+```
+
+### sgdd X lci
+
+```{r, out.width="150%", out.height="150%"}
+out_growth %>% 
+  dplyr::right_join(best_mod_gr) %>% 
+  dplyr::filter(type_compet == "lci") %>% 
+  dplyr::select(species, sample, fold, mod_id, submod_id, weight,
+                contains("coef."), 
+                -contains(c("pval", "bal", "bat"))) %>% 
+  dplyr::rename_all(~gsub(".est", "", .)) %>% 
+  replace(is.na(.), 0) %>% 
+  dplyr::left_join(data_mean_env, by = "species") %>% 
+  dplyr::slice(rep(1:n(), each = 100*2)) %>% # 2 lci groups
+  dplyr::group_by(species, sample, fold, mod_id, submod_id) %>%
+  dplyr::mutate(x_sgdd = rep(seq(unique(sgdd_qt1), unique(sgdd_qt9),
+                                    length = 100), 
+                                each = 2),
+
+                lci_group = rep(c("in sun", "in shade"), times = 100),
+                
+                lci_value = case_when(
+                  lci_group == "in sun" ~ 0.1,
+                  lci_group == "in shade" ~ 0.9
+                ),
+                lci_group = factor(lci_group, c("in sun", "in shade"))) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(
+    dD = predict_growth(
+      dbh_mean, lci_value, x_sgdd, aet2pet_mean, ., data_growth_scaled$attr)) %>% 
+  dplyr::group_by(species, sample, fold, 
+                  x_sgdd, lci_group) %>% 
+  dplyr::summarise(dD = weighted.mean(dD, weight)) %>% 
+  dplyr::group_by(species, lci_group, x_sgdd) %>% 
+  dplyr::summarise(conf.low = quantile(dD, 0.025),
+                   conf.up = quantile(dD, 0.975),
+                   dD = mean(dD)) %>% 
+  dplyr::mutate(species = factor(species, levels = data_mean_env %>% 
+                                   dplyr::arrange(aet2pet_mean) %>% 
+                                   dplyr::pull(species))) %>% 
+  
+  ggplot(aes(y = dD, x = x_sgdd, color = lci_group)) +
+  scale_color_manual(values = c("goldenrod1", "#595959")) +
+  geom_ribbon(aes(ymin = conf.low,
+                  ymax = conf.up,
+                  group=lci_group),
+              fill = "gray",
+              color = "gray") + 
+  geom_line() +
+  facet_wrap(~species, scales = "free") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        strip.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 45, size = 5),
+        axis.text.y = element_text(size = 5)) +
+  xlab("Temperature gradient (sgdd)") +
+  ylab("Annual diameter increment in mm")
+```
+
+
+## Survival
+
+### aet2pet X lci
+
+```{r, out.width="150%", out.height="150%"}
+out_mortality %>% 
+  dplyr::right_join(best_mod_morta) %>% 
+  dplyr::filter(type_compet == "lci") %>% 
+  dplyr::select(species, sample, fold, mod_id, submod_id, weight,
+                contains("coef."), 
+                -contains(c("pval", "bal", "bat"))) %>% 
+  dplyr::rename_all(~gsub(".est", "", .)) %>% 
+  replace(is.na(.), 0) %>% 
+  dplyr::left_join(data_mean_env, by = "species") %>% 
+  dplyr::slice(rep(1:n(), each = 100*2)) %>% # 2 lci groups
+  dplyr::group_by(species, sample, fold, mod_id, submod_id) %>%
+  dplyr::mutate(x_aet2pet = rep(seq(unique(aet2pet_qt1), unique(aet2pet_qt9),
+                                    length = 100), 
+                                each = 2),
+
+                lci_group = rep(c("in sun", "in shade"), times = 100),
+                
+                lci_value = case_when(
+                  lci_group == "in sun" ~ 0.1,
+                  lci_group == "in shade" ~ 0.9
+                ),
+                lci_group = factor(lci_group, c("in sun", "in shade"))) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(
+    surv = 1 - predict_mortality(
+      dbh_mean, lci_value, sgdd_mean, x_aet2pet, ., data_growth_scaled$attr)) %>% 
+  dplyr::group_by(species, sample, fold, 
+                  x_aet2pet, lci_group) %>% 
+  dplyr::summarise(surv = weighted.mean(surv, weight)) %>% 
+  dplyr::group_by(species, lci_group, x_aet2pet) %>% 
+  dplyr::summarise(conf.low = quantile(surv, 0.025),
+                   conf.up = quantile(surv, 0.975),
+                   surv = mean(surv)) %>% 
+  dplyr::mutate(species = factor(species, levels = data_mean_env %>% 
+                                   dplyr::arrange(aet2pet_mean) %>% 
+                                   dplyr::pull(species))) %>% 
+  
+  ggplot(aes(y = surv, x = x_aet2pet, color = lci_group)) +
+  scale_color_manual(values = c("goldenrod1", "#595959")) +
+  geom_ribbon(aes(ymin = conf.low,
+                  ymax = conf.up,
+                  group=lci_group),
+              fill = "gray",
+              color = "gray") + 
+  geom_line() +
+  facet_wrap(~species, scales = "free") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        strip.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 45, size = 5),
+        axis.text.y = element_text(size = 5)) +
+  xlab("Water-availability gradient (aet2pet)") +
+  ylab("Annual probability of survival")
+```
+
+### sgdd X lci
+
+```{r, out.width="150%", out.height="150%"}
+out_mortality %>% 
+  dplyr::right_join(best_mod_morta) %>% 
+  dplyr::filter(type_compet == "lci") %>% 
+  dplyr::select(species, sample, fold, mod_id, submod_id, weight,
+                contains("coef."), 
+                -contains(c("pval", "bal", "bat"))) %>% 
+  dplyr::rename_all(~gsub(".est", "", .)) %>% 
+  replace(is.na(.), 0) %>% 
+  dplyr::left_join(data_mean_env, by = "species") %>% 
+  dplyr::slice(rep(1:n(), each = 100*2)) %>% # 2 lci groups
+  dplyr::group_by(species, sample, fold, mod_id, submod_id) %>%
+  dplyr::mutate(x_sgdd = rep(seq(unique(sgdd_qt1), unique(sgdd_qt9),
+                                    length = 100), 
+                                each = 2),
+
+                lci_group = rep(c("in sun", "in shade"), times = 100),
+                
+                lci_value = case_when(
+                  lci_group == "in sun" ~ 0.1,
+                  lci_group == "in shade" ~ 0.9
+                ),
+                lci_group = factor(lci_group, c("in sun", "in shade"))) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(
+    surv = 1 - predict_mortality(
+      dbh_mean, lci_value, x_sgdd, aet2pet_mean, ., data_growth_scaled$attr)) %>% 
+  dplyr::group_by(species, sample, fold, 
+                  x_sgdd, lci_group) %>% 
+  dplyr::summarise(surv = weighted.mean(surv, weight)) %>% 
+  dplyr::group_by(species, lci_group, x_sgdd) %>% 
+  dplyr::summarise(conf.low = quantile(surv, 0.025),
+                   conf.up = quantile(surv, 0.975),
+                   surv = mean(surv)) %>% 
+  dplyr::mutate(species = factor(species, levels = data_mean_env %>% 
+                                   dplyr::arrange(aet2pet_mean) %>% 
+                                   dplyr::pull(species))) %>% 
+  
+  ggplot(aes(y = surv, x = x_sgdd, color = lci_group)) +
+  scale_color_manual(values = c("goldenrod1", "#595959")) +
+  geom_ribbon(aes(ymin = conf.low,
+                  ymax = conf.up,
+                  group=lci_group),
+              fill = "gray",
+              color = "gray") + 
+  geom_line() +
+  facet_wrap(~species, scales = "free") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        strip.text = element_text(size = 5),
+        axis.text.x = element_text(angle = 45, size = 5),
+        axis.text.y = element_text(size = 5)) +
+  xlab("Temperature gradient (sgdd)") +
+  ylab("Annual probability of survival")
+```
+
+
+# Model predictions (for each species)
+
+## aet2pet x lci
+
+```{r}
+data_surv_aet2pet <- out_mortality %>% 
+  dplyr::right_join(best_mod_morta) %>% 
+  dplyr::filter(type_compet == "lci") %>% 
+  dplyr::select(species, sample, fold, mod_id, submod_id, weight,
+                contains("coef."), 
+                -contains(c("pval", "bal", "bat"))) %>% 
+  dplyr::rename_all(~gsub(".est", "", .)) %>% 
+  replace(is.na(.), 0) %>% 
+  dplyr::left_join(data_mean_env, by = "species") %>% 
+  dplyr::slice(rep(1:n(), each = 100*2)) %>% # 2 lci groups
+  dplyr::group_by(species, sample, fold, mod_id, submod_id) %>%
+  dplyr::mutate(x_aet2pet = rep(seq(unique(aet2pet_qt1), unique(aet2pet_qt9),
+                                    length = 100), 
+                                each = 2),
+
+                lci_group = rep(c("in sun", "in shade"), times = 100),
+                
+                lci_value = case_when(
+                  lci_group == "in sun" ~ 0.1,
+                  lci_group == "in shade" ~ 0.9
+                ),
+                lci_group = factor(lci_group, c("in sun", "in shade"))) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(
+    surv = 1 - predict_mortality(
+      dbh_mean, lci_value, sgdd_mean, x_aet2pet, ., data_growth_scaled$attr)) %>% 
+  dplyr::group_by(species, sample, fold, 
+                  x_aet2pet, lci_group) %>% 
+  dplyr::summarise(surv = weighted.mean(surv, weight)) %>% 
+  dplyr::group_by(species, lci_group, x_aet2pet) %>% 
+  dplyr::summarise(conf.low = quantile(surv, 0.025),
+                   conf.up = quantile(surv, 0.975),
+                   surv = mean(surv)) %>% 
+  dplyr::mutate(species = factor(species, levels = data_mean_env %>% 
+                                   dplyr::arrange(aet2pet_mean) %>% 
+                                   dplyr::pull(species)))
+
+data_gr_aet2pet <- out_growth %>% 
+  dplyr::right_join(best_mod_gr) %>% 
+  dplyr::filter(type_compet == "lci") %>% 
+  dplyr::select(species, sample, fold, mod_id, submod_id, weight,
+                contains("coef."), 
+                -contains(c("pval", "bal", "bat"))) %>% 
+  dplyr::rename_all(~gsub(".est", "", .)) %>% 
+  replace(is.na(.), 0) %>% 
+  dplyr::left_join(data_mean_env, by = "species") %>% 
+  dplyr::slice(rep(1:n(), each = 100*2)) %>% # 2 lci groups
+  dplyr::group_by(species, sample, fold, mod_id, submod_id) %>%
+  dplyr::mutate(x_aet2pet = rep(seq(unique(aet2pet_qt1), unique(aet2pet_qt9),
+                                    length = 100), 
+                                each = 2),
+
+                lci_group = rep(c("in sun", "in shade"), times = 100),
+                
+                lci_value = case_when(
+                  lci_group == "in sun" ~ 0.1,
+                  lci_group == "in shade" ~ 0.9
+                ),
+                lci_group = factor(lci_group, c("in sun", "in shade"))) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(
+    dD = predict_growth(
+      dbh_mean, lci_value, sgdd_mean, x_aet2pet, ., data_growth_scaled$attr)) %>% 
+  dplyr::group_by(species, sample, fold, 
+                  x_aet2pet, lci_group) %>% 
+  dplyr::summarise(dD = weighted.mean(dD, weight)) %>% 
+  dplyr::group_by(species, lci_group, x_aet2pet) %>% 
+  dplyr::summarise(conf.low = quantile(dD, 0.025),
+                   conf.up = quantile(dD, 0.975),
+                   dD = mean(dD)) %>% 
+  dplyr::mutate(species = factor(species, levels = data_mean_env %>% 
+                                   dplyr::arrange(aet2pet_mean) %>% 
+                                   dplyr::pull(species)))
+
+for (sp in c("Pinus sylvestris", "Picea abies", "Fagus sylvatica", "Abies alba")) {
+  
+  plot_surv_aet2pet <- data_surv_aet2pet %>% 
+    dplyr::filter(species == sp) %>% 
+    
+    ggplot(aes(y = surv, x = x_aet2pet, color = lci_group)) +
+    scale_color_manual(values = c("goldenrod1", "#595959")) +
+    geom_ribbon(aes(ymin = conf.low,
+                    ymax = conf.up,
+                    group=lci_group),
+                fill = "gray",
+                color = "gray") + 
+    geom_line(size = 1.05) +
+    theme_minimal() +
+    labs(subtitle = "SURVIVAL") +
+    theme(legend.position = "top",
+          plot.subtitle = element_text(hjust = 0.5),
+          strip.text = element_text(size = 5),
+          axis.text.x = element_text(angle = 45)) +
+    xlab("water-stress gradient (aet2pet)") +
+    ylab("Annual probability of survival")
+  
+  legend_aet2pet <- get_legend(plot_surv_aet2pet)
+  plot_surv_aet2pet <- plot_surv_aet2pet +
+    theme(legend.position = "none")
+  
+ plot_gr_aet2pet <- data_gr_aet2pet %>% 
+    dplyr::filter(species == sp) %>% 
+    
+    ggplot(aes(y = dD, x = x_aet2pet, color = lci_group)) +
+    scale_color_manual(values = c("goldenrod1", "#595959")) +
+    geom_ribbon(aes(ymin = conf.low,
+                    ymax = conf.up,
+                    group=lci_group),
+                fill = "gray",
+                color = "gray") + 
+    geom_line(size = 1.05) +
+    theme_minimal() +
+    labs(subtitle = "GROWTH") +
+    theme(legend.position = "none",
+          plot.subtitle = element_text(hjust = 0.5),
+          strip.text = element_text(size = 5),
+          axis.text.x = element_text(angle = 45)) +
+    xlab("water-stress gradient (aet2pet)") +
+    ylab("Annual diameter increment in mm")
+  
+  print(cowplot::plot_grid(
+    cowplot::ggdraw() + cowplot::draw_label(sp),
+    legend_aet2pet,
+    cowplot::plot_grid(plot_gr_aet2pet, plot_surv_aet2pet, nrow = 1),
+    ncol = 1, rel_heights = c(1, 1, 10)
+  ))
+  
+}
+```
+
+
+
+## sgdd x lci
