@@ -154,13 +154,13 @@ Fit_Growth <- function(sp = "Abies alba",
           
           # message("Dredging...")
           
-          mod_full_gr <- do.call("lme", list(
+          mod_full_gr <- lme(
             fixed = as.formula(paste0("dD_log ~ ", formulas_full[i_formula])),
             random = ~1|plotcode,
             data = data_gr_train,
             method = "ML",
             control = lmeControl(opt = "optim")
-          ))
+          )
 
           # Test AICc of all submodels (fitting by ML)
           fixed_dredge <- c("dbh", "dbh_log", "lci", "bat", "bal")
