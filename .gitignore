@@ -1,0 +1,11 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+com/
+docs/
+paper/
+1_Database/data
+1_Database/output
+2_Calibration/data
+2_Calibration/output
