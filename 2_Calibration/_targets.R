@@ -12,10 +12,8 @@ lapply(grep("R$", list.files("R", recursive = TRUE), value = TRUE), function(x) 
 options(tidyverse.quiet = TRUE, clustermq.scheduler = "multiprocess")
 
 tar_option_set(packages = c("dplyr", "tidyr", "data.table", "vroom",
-                            "foreign", "sp", "terra", "readxl",
-                            "httr", "rgdal", "purrr", "lubridate",
-                            "truncnorm", "RCapsis", "TNRS",
-                            "RPostgreSQL", "nlme", "pROC",
+                            "purrr", "lubridate", "MuMIn",
+                            "truncnorm", "RPostgreSQL", "nlme", "pROC",
                             "stringr", "Hmisc", "FactoMineR", "factoextra"))
 
 # List of targets
@@ -28,7 +26,8 @@ list(
   # PREPARE DATASETS ----
   ## Create global dataset ----
   tar_target(dataset_global, 
-             Create_GlobalDataset()),
+             Create_GlobalDataset(from_inrae_database = FALSE, 
+                                  datasets_folderpath = "../1_Database/output")),
   
   ## Prepare global dataset ----
   tar_target(dataset_global_cleaned,
@@ -78,7 +77,8 @@ list(
   tar_target(attr_growth_scaled_fp,
              Save_Dataframe(data_growth_scaled$attr, "output/attr_growth_scaled.csv")),
   
-  tar_target(species_calib_growth, names(sort(table(data_growth$species), decreasing = T))),
+  tar_target(species_calib_growth, c("Robinia pseudoacacia")),
+             # names(sort(table(data_growth$species), decreasing = T))),
   
   
   ### Mortality dataset
@@ -108,7 +108,8 @@ list(
              Save_Dataframe(data_mortality_scaled$attr, "output/attr_mortality_scaled.csv")),
   
   
-  tar_target(species_calib_mortality, names(sort(table(data_mortality$species), decreasing = T))),
+  tar_target(species_calib_mortality, c("Robinia pseudoacacia")),
+             # names(sort(table(data_mortality$species), decreasing = T))),
   
   
   ## Get mean environment dataset ----
@@ -132,37 +133,63 @@ list(
   
   
   # CALIBRATE MODELS ----
+  # tar_target(fit_growth_scaled, Fit_Growth(sp = species_calib_growth,
+  #                                   data_gr = data_growth_scaled$data,
+  #                                   n_samples = 20,
+  #                                   resampling_weighted_by = c("dbh", "aet2pet", "sgdd"),
+  #                                   prop_resampling = 0.8,
+  #                                   n_folds = 5,
+  #                                   use_dredge = TRUE,
+  #                                   get_only_coefs = TRUE,
+  #                                   seed = 38),
+  #            pattern = map(species_calib_growth),
+  #            iteration = "list"),
+  # 
+  # tar_target(fit_mortality_scaled, Fit_Mortality(sp = species_calib_mortality,
+  #                                         data_morta = data_mortality_scaled$data,
+  #                                         n_samples = 20,
+  #                                         resampling_weighted_by = c("dbh", "aet2pet", "sgdd"),
+  #                                         prop_resampling = 0.8,
+  #                                         n_folds = 5,
+  #                                         use_dredge = TRUE,
+  #                                         get_only_coefs = TRUE,
+  #                                         seed = 38),
+  #            pattern = map(species_calib_mortality),
+  #            iteration = "list"),
+
+  
   tar_target(fit_growth, Fit_Growth(sp = species_calib_growth,
-                                    data_gr = data_growth_scaled$data,
+                                    data_gr = data_growth,
                                     n_samples = 20,
                                     resampling_weighted_by = c("dbh", "aet2pet", "sgdd"),
                                     prop_resampling = 0.8,
                                     n_folds = 5,
                                     use_dredge = TRUE,
                                     get_only_coefs = TRUE,
+                                    compet_type = c("lci"),
                                     seed = 38),
              pattern = map(species_calib_growth),
              iteration = "list"),
-  
+
   tar_target(fit_mortality, Fit_Mortality(sp = species_calib_mortality,
-                                          data_morta = data_mortality_scaled$data,
+                                          data_morta = data_mortality,
                                           n_samples = 20,
                                           resampling_weighted_by = c("dbh", "aet2pet", "sgdd"),
                                           prop_resampling = 0.8,
                                           n_folds = 5,
                                           use_dredge = TRUE,
                                           get_only_coefs = TRUE,
+                                          compet_type = c("lci"),
                                           seed = 38),
              pattern = map(species_calib_mortality),
              iteration = "list"),
   
-  
-  # GET OUTPUT TABLES ----
-  tar_target(out_growth, Get_OutputTable_Growth(fit_growth, data_growth)),
-  tar_target(out_mortality, Get_OutputTable_Mortality(fit_mortality, data_mortality)),
-  
-  tar_target(out_growth_fp, Save_Dataframe(out_growth, "output/out_growth.csv")),
-  tar_target(out_mortality_fp, Save_Dataframe(out_mortality, "output/out_mortality.csv")),
+  # # GET OUTPUT TABLES ----
+  # tar_target(out_growth, Get_OutputTable_Growth(fit_growth, data_growth)),
+  # tar_target(out_mortality, Get_OutputTable_Mortality(fit_mortality, data_mortality)),
+  # 
+  # tar_target(out_growth_fp, Save_Dataframe(out_growth, "output/out_growth.csv")),
+  # tar_target(out_mortality_fp, Save_Dataframe(out_mortality, "output/out_mortality.csv")),
   
   
   

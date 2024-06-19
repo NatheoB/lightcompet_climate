@@ -98,33 +98,38 @@ Fit_Mortality <- function(sp = "Abies alba",
                                 "")
       
       # Full model with all variables and interactions
-      formulas_full <- paste0(
-        "dbh + dbh_log + aet2pet_inv",
-        
-        c(
-          # Control
-          " + sgdd_inv",
-          " + sgdd + I(sgdd^2)",
-          
-          # Light competition index          
-          " + lci + lci:aet2pet_inv + sgdd_inv + lci:sgdd_inv",
-          " + lci + lci:aet2pet_inv + sgdd + I(sgdd^2) + lci:sgdd",
-          
-          # Basal area of larger trees
-          " + bal + bal:aet2pet_inv + sgdd_inv + bal:sgdd_inv",
-          " + bal + bal:aet2pet_inv + sgdd + I(sgdd^2) + bal:sgdd",
-          
-          # Total basal area
-          " + bat + bat:aet2pet_inv + sgdd_inv + bat:sgdd_inv",
-          " + bat + bat:aet2pet_inv + sgdd + I(sgdd^2) + bat:sgdd",
-          
-          # Total basal area and interaction with diameter
-          " + bat + bat:dbh + bat:aet2pet_inv + sgdd_inv + bat:sgdd_inv",
-          " + bat + bat:dbh + bat:aet2pet_inv + sgdd + I(sgdd^2) + bat:sgdd"
-        ),
-        
-        formula_country
-      )
+      formulas_full <- c()
+      
+      ## Add given competition index
+      
+      ### Control model
+      if ("control" %in% compet_type) formulas_full <- c(formulas_full, "", "")
+      
+      ### Basal area of larger trees
+      if ("bal" %in% compet_type) formulas_full <- c(formulas_full, 
+                                                     " + sgdd_inv + bal + bal:aet2pet_inv + bal:sgdd_inv",
+                                                     " + sgdd + I(sgdd^2) + bal + bal:aet2pet_inv + bal:sgdd")
+      
+      ### Total basal area
+      if ("bat" %in% compet_type) formulas_full <- c(formulas_full, 
+                                                     " + sgdd_inv + bat + bat:aet2pet_inv + bat:sgdd_inv",
+                                                     " + sgdd + I(sgdd^2) + bat + bat:aet2pet_inv + bat:sgdd")
+      
+      ### Total basal area with intercation with dbh
+      if ("batXdbh" %in% compet_type) formulas_full <- c(formulas_full, 
+                                                         " + sgdd_inv + bat + bat:aet2pet_inv + bat:sgdd_inv + bat:dbh",
+                                                         " + sgdd + I(sgdd^2) + bat + bat:aet2pet_inv + bat:sgdd + bat:dbh")
+      
+      ### Light competition index
+      if ("lci" %in% compet_type) formulas_full <- c(formulas_full, 
+                                                     " + sgdd_inv + lci + lci:aet2pet_inv + lci:sgdd_inv",
+                                                     " + sgdd + I(sgdd^2) + lci + lci:aet2pet_inv + lci:sgdd")
+      
+      ## Add common variables
+      formulas_full <- paste0("dbh + dbh_log + aet2pet_inv", formulas_full, formula_country)
+      
+      
+      # Fit and dredge all full models
       n_formulas_full <- length(formulas_full)
       
       mods_morta_sp_sample_fold <- vector(mode = "list", length = n_formulas_full)

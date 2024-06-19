@@ -8,7 +8,9 @@
 #' 
 Create_GlobalDataset <- function(from_inrae_database = TRUE, datasets_folderpath = NULL) {
 
-
+  datasets_name <- c("calib_plots", "calib_trees",
+                     "calib_compet", "calib_climate")
+  
   if (from_inrae_database) {
     # Get login and password from .Renviron file ----
     # You have to create a file called ".Renviron" with :
@@ -17,9 +19,6 @@ Create_GlobalDataset <- function(from_inrae_database = TRUE, datasets_folderpath
     # Do not forget to .gitignore the file to not share your logs
     login <- Sys.getenv("LOGIN")
     password <- Sys.getenv("PASSWORD")
-    
-    datasets_name <- c("calib_plots", "calib_trees",
-                       "calib_compet", "calib_climate")
     
     print("Importing datasets from database...")
     # Import all datasets from INRAE database ----
@@ -30,12 +29,8 @@ Create_GlobalDataset <- function(from_inrae_database = TRUE, datasets_folderpath
     if (is.null(datasets_folderpath)) stop("NULL dataset folderpath")
     
     # Import datasets from the given folderpath
-    datasets_name <- c("data_calib_plots", "data_calib_trees",
-                       "data_calib_compet", "data_calib_climate")
-    datasets_fp <- file.path(datasets_folderpath, datasets_name)
-    
-    datasets_list <- sapply(datasets_fp, 
-                            vroom, show_col_types = FALSE, 
+    datasets_list <- sapply(datasets_name, 
+                            function(x) vroom(file.path(datasets_folderpath, paste0("data_", x, ".csv")), show_col_types = FALSE), 
                             simplify = T, USE.NAMES = T)
   }
 
