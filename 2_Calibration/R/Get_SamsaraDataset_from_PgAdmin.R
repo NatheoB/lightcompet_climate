@@ -17,7 +17,7 @@ Get_SamsaraDataset_from_PgAdmin <- function(dataset_name, username, password) {
   # Prepare connection
   con <- dbConnect(dbDriver("PostgreSQL"), 
                    dbname = "basedtm", 
-                   host   = "siddt.grenoble.irstea.priv", 
+                   host   = "siddt.inra.local", 
                    port   = "5432", 
                    user   = username, 
                    password = password)
