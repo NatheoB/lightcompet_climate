@@ -77,8 +77,8 @@ list(
   tar_target(attr_growth_scaled_fp,
              Save_Dataframe(data_growth_scaled$attr, "output/attr_growth_scaled.csv")),
   
-  tar_target(species_calib_growth, c("Robinia pseudoacacia")),
-             # names(sort(table(data_growth$species), decreasing = T))),
+  tar_target(species_calib_growth,
+             names(sort(table(data_growth$species), decreasing = T))),
   
   
   ### Mortality dataset
@@ -108,8 +108,8 @@ list(
              Save_Dataframe(data_mortality_scaled$attr, "output/attr_mortality_scaled.csv")),
   
   
-  tar_target(species_calib_mortality, c("Robinia pseudoacacia")),
-             # names(sort(table(data_mortality$species), decreasing = T))),
+  tar_target(species_calib_mortality, 
+             names(sort(table(data_mortality$species), decreasing = T))),
   
   
   ## Get mean environment dataset ----
@@ -184,15 +184,26 @@ list(
              pattern = map(species_calib_mortality),
              iteration = "list"),
   
-  # # GET OUTPUT TABLES ----
-  # tar_target(out_growth, Get_OutputTable_Growth(fit_growth, data_growth)),
-  # tar_target(out_mortality, Get_OutputTable_Mortality(fit_mortality, data_mortality)),
-  # 
-  # tar_target(out_growth_fp, Save_Dataframe(out_growth, "output/out_growth.csv")),
-  # tar_target(out_mortality_fp, Save_Dataframe(out_mortality, "output/out_mortality.csv")),
+  # GET OUTPUT TABLES ----
+  tar_target(out_growth, Get_OutputTable_Growth(fit_growth, data_growth)),
+  tar_target(out_mortality, Get_OutputTable_Mortality(fit_mortality, data_mortality)),
+
+  # CREATE FINAL DATASETS ----
+  tar_target(params_growth_all, Get_Params(out_growth)),
+  tar_target(params_mortality_all, Get_Params(out_mortality)),
   
+  tar_target(params_growth_mean, Summarise_Params(params_growth_all)),
+  tar_target(params_mortality_mean, Summarise_Params(params_mortality_all)),
   
+  # SAVE DATASETS ----
+  tar_target(out_growth_fp, Save_Dataframe(out_growth, "output/out_growth.csv")),
+  tar_target(out_mortality_fp, Save_Dataframe(out_mortality, "output/out_mortality.csv")),
   
+  tar_target(params_growth_all_fp, Save_Dataframe(params_growth_all, "output/params_growth_all.csv")),
+  tar_target(params_mortality_all_fp, Save_Dataframe(params_mortality_all, "output/params_mortality_all.csv")),
+  
+  tar_target(params_growth_mean_fp, Save_Dataframe(params_growth_mean, "output/params_growth_mean.csv")),
+  tar_target(params_mortality_mean_fp, Save_Dataframe(params_mortality_mean, "output/params_mortality_mean.csv")),
   
   NULL
   )

@@ -144,10 +144,10 @@ Fit_Growth <- function(sp = "Abies alba",
       mods_gr_sp_sample_fold <- vector(mode = "list", length = n_formulas_full)
       for (i_formula in 1:n_formulas_full) {
         
-        # print(paste0("species ", sp, 
-        #              " - sample ", s, "/", n_samples,
-        #              " - fold ", f, "/", n_folds,
-        #              " - formula ", i_formula, "/", n_formulas_full))
+        print(paste0("species ", sp,
+                     " - sample ", s, "/", n_samples,
+                     " - fold ", f, "/", n_folds,
+                     " - formula ", i_formula, "/", n_formulas_full))
         
         # Apply dredge on the given full formula
         if (use_dredge) {
@@ -183,7 +183,6 @@ Fit_Growth <- function(sp = "Abies alba",
               rank = "AICc",
               fixed = fixed_dredge
             )
-            print(formulas_full)
           }
           options(na.action = "na.omit")
           

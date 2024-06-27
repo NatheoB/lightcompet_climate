@@ -7,5 +7,7 @@ docs/
 paper/
 1_Database/data
 1_Database/output
+1_Database/_targets
 2_Calibration/data
 2_Calibration/output
+2_Calibration/_targets

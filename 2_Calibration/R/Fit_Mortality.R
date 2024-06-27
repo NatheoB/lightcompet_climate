@@ -6,6 +6,7 @@ Fit_Mortality <- function(sp = "Abies alba",
                           n_folds = 5,
                           use_dredge = TRUE,
                           get_only_coefs = FALSE,
+                          compet_type = c("lci", "bat", "batXdbh", "bal", "control"),
                           seed = 38
 ) {
   
