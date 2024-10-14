@@ -1,6 +1,6 @@
 Fit_Mortality <- function(sp = "Abies alba",
                           data_morta,
-                          n_samples = 2,
+                          id_sample,
                           resampling_weighted_by = c("dbh", "aet2pet", "sgdd"),
                           prop_resampling = 0.8,
                           n_folds = 5,
@@ -10,7 +10,7 @@ Fit_Mortality <- function(sp = "Abies alba",
                           seed = 38
 ) {
   
-  print(sp)
+  print(paste("Mortality", sp, "sample", id_sample))
   
   set.seed(seed)
   
@@ -59,10 +59,6 @@ Fit_Mortality <- function(sp = "Abies alba",
   }
   
   
-  ## Fit samples ----
-  mods_morta_sp <- vector(mode = "list", length = n_samples)
-  for (s in 1:n_samples) {
-    
     ### Resample 70% of the dataset ----
     data_sampling <- data_morta_sp %>% 
       dplyr::group_by(country) %>% 
@@ -99,35 +95,38 @@ Fit_Mortality <- function(sp = "Abies alba",
                                 "")
       
       # Full model with all variables and interactions
-      formulas_full <- c()
+      formula_base <- c("dbh + dbh_log + aet2pet_inv + offset(log(dyears))")
       
-      ## Add given competition index
+      ## Add given competition index and sgdd type
+      formulas_sgdd_compet <- c()
       
       ### Control model
-      if ("control" %in% compet_type) formulas_full <- c(formulas_full, "", "")
+      if ("control" %in% compet_type) formulas_sgdd_compet <- c(formulas_sgdd_compet, 
+                                                                " + sgdd_inv",
+                                                                " + sgdd + I(sgdd^2)")
       
       ### Basal area of larger trees
-      if ("bal" %in% compet_type) formulas_full <- c(formulas_full, 
-                                                     " + sgdd_inv + bal + bal:aet2pet_inv + bal:sgdd_inv",
-                                                     " + sgdd + I(sgdd^2) + bal + bal:aet2pet_inv + bal:sgdd")
+      if ("bal" %in% compet_type) formulas_sgdd_compet <- c(formulas_sgdd_compet, 
+                                                            " + sgdd_inv + bal + bal:aet2pet_inv + bal:sgdd_inv",
+                                                            " + sgdd + I(sgdd^2) + bal + bal:aet2pet_inv + bal:sgdd")
       
       ### Total basal area
-      if ("bat" %in% compet_type) formulas_full <- c(formulas_full, 
-                                                     " + sgdd_inv + bat + bat:aet2pet_inv + bat:sgdd_inv",
-                                                     " + sgdd + I(sgdd^2) + bat + bat:aet2pet_inv + bat:sgdd")
+      if ("bat" %in% compet_type) formulas_sgdd_compet <- c(formulas_sgdd_compet, 
+                                                            " + sgdd_inv + bat + bat:aet2pet_inv + bat:sgdd_inv",
+                                                            " + sgdd + I(sgdd^2) + bat + bat:aet2pet_inv + bat:sgdd")
       
       ### Total basal area with intercation with dbh
-      if ("batXdbh" %in% compet_type) formulas_full <- c(formulas_full, 
-                                                         " + sgdd_inv + bat + bat:aet2pet_inv + bat:sgdd_inv + bat:dbh",
-                                                         " + sgdd + I(sgdd^2) + bat + bat:aet2pet_inv + bat:sgdd + bat:dbh")
+      if ("batXdbh" %in% compet_type) formulas_sgdd_compet <- c(formulas_sgdd_compet, 
+                                                                " + sgdd_inv + bat + bat:aet2pet_inv + bat:sgdd_inv + bat:dbh",
+                                                                " + sgdd + I(sgdd^2) + bat + bat:aet2pet_inv + bat:sgdd + bat:dbh")
       
       ### Light competition index
-      if ("lci" %in% compet_type) formulas_full <- c(formulas_full, 
-                                                     " + sgdd_inv + lci + lci:aet2pet_inv + lci:sgdd_inv",
-                                                     " + sgdd + I(sgdd^2) + lci + lci:aet2pet_inv + lci:sgdd")
+      if ("lci" %in% compet_type) formulas_sgdd_compet <- c(formulas_sgdd_compet, 
+                                                            " + sgdd_inv + lci + lci:aet2pet_inv + lci:sgdd_inv",
+                                                            " + sgdd + I(sgdd^2) + lci + lci:aet2pet_inv + lci:sgdd")
       
       ## Add common variables
-      formulas_full <- paste0("dbh + dbh_log + aet2pet_inv", formulas_full, formula_country)
+      formulas_full <- paste0(formula_base, formulas_sgdd_compet, formula_country)
       
       
       # Fit and dredge all full models
@@ -136,21 +135,23 @@ Fit_Mortality <- function(sp = "Abies alba",
       mods_morta_sp_sample_fold <- vector(mode = "list", length = n_formulas_full)
       for (i_formula in 1:n_formulas_full) {
         
-        # print(paste0("species ", sp, 
-        #              " - sample ", s, "/", n_samples,
+        formula_full <- paste0("dead ~ ", formulas_full[i_formula])
+        # print(paste0("species ", sp,
+        #              " - sample ", id_sample,
         #              " - fold ", f, "/", n_folds,
         #              " - formula ", i_formula, "/", n_formulas_full))
+        # print(formula_full)
         
         if (use_dredge) {
           
           mod_full_morta <- 
-            glm(formula = as.formula(paste0("dead ~ ", formulas_full[i_formula])),
+            glm(formula = as.formula(formula_full),
                 data = data_morta_train, 
                 family = binomial(link=cloglog))
           
           
           # Test AICc of all submodels
-          fixed_dredge <- c("dbh", "dbh_log", "offset(log(dyears))", "lci", "bat", "bal")
+          fixed_dredge <- c("dbh", "dbh_log", "offset(log(dyears))", "lci", "bat", "bal", "bat:dbh")
           if (n_countries > 1) fixed_dredge <- c(fixed_dredge, "country")
           
           options(na.action = "na.fail")
@@ -194,7 +195,7 @@ Fit_Mortality <- function(sp = "Abies alba",
           
           # Init output list
           mods_morta_sp_sample_fold_formulafull[[i]] <- 
-            list(species = sp, sample = s, fold = f, 
+            list(species = sp, sample = id_sample, fold = f, 
                  mod_id = i_formula, submod_id = i,
                  samplesize = nrow(data_morta_train),
                  formula_full = formulas_full[i_formula],
@@ -237,10 +238,6 @@ Fit_Mortality <- function(sp = "Abies alba",
       
       mods_morta_sp_sample[[f]] <- mods_morta_sp_sample_fold 
     }
-    
-    mods_morta_sp[[s]] <- mods_morta_sp_sample
-  }
   
-  
-  mods_morta_sp
+  mods_morta_sp_sample
 }
