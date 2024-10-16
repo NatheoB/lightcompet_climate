@@ -12,7 +12,7 @@ Fit_Growth <- function(sp = "Abies alba",
   
   print(paste("Growth", sp, "sample", id_sample))
   
-  set.seed(seed)
+  set.seed(seed + id_sample)
   
   # Filter dataset
   data_gr_sp <- data_gr %>% 

@@ -6,7 +6,8 @@ library(future.callr)
 plan(callr)
 
 # Source functions in R folder
-lapply(grep("R$", list.files("R", recursive = TRUE), value = TRUE), function(x) source(file.path("R", x)))
+lapply(grep("R$", list.files("R", recursive = TRUE), value = TRUE), 
+       function(x) source(file.path("R", x)))
 
 # Set options (i.e. clustermq.scheduler for multiprocess computing)
 options(tidyverse.quiet = TRUE, clustermq.scheduler = "multiprocess")
@@ -78,8 +79,7 @@ list(
              Save_Dataframe(data_growth_scaled$attr, "output/attr_growth_scaled.csv")),
   
   tar_target(species_calib_growth,
-             # names(sort(table(data_growth$species), decreasing = T))),
-             c("Picea abies", "Abies alba", "Fagus sylvatica")),
+             names(sort(table(data_growth$species), decreasing = T))),
   
   
   ### Mortality dataset
@@ -110,8 +110,7 @@ list(
   
   
   tar_target(species_calib_mortality, 
-             # names(sort(table(data_mortality$species), decreasing = T))),
-             c("Picea abies", "Abies alba", "Fagus sylvatica")),
+             names(sort(table(data_mortality$species), decreasing = T))),
   
   
   ## Get mean environment dataset ----
@@ -169,6 +168,15 @@ list(
                                                  seed = seed),
              pattern = cross(species_calib_mortality, id_samples),
              iteration = "list"),
+  
+  
+  # GET OUTPUT TABLES ----
+  tar_target(out_growth, Get_OutputTable_Growth(fit_growth_scaled, data_growth)),
+  tar_target(out_mortality, Get_OutputTable_Mortality(fit_mortality_scaled, data_mortality)),
+  
+  tar_target(out_growth_fp, Save_Dataframe(out_growth, "output/out_growth.csv")),
+  tar_target(out_mortality_fp, Save_Dataframe(out_mortality, "output/out_mortality.csv")),
+  
   
   
   # tar_target(fit_growth, Fit_Growth(sp = species_calib_growth,

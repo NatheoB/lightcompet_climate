@@ -12,7 +12,7 @@ Fit_Mortality <- function(sp = "Abies alba",
   
   print(paste("Mortality", sp, "sample", id_sample))
   
-  set.seed(seed)
+  set.seed(seed + id_sample)
   
   # Filter dataset
   data_morta_sp <- data_morta %>% 

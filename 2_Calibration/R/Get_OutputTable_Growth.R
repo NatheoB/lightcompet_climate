@@ -7,21 +7,14 @@ Get_OutputTable_Growth <- function(fit_growth, data_growth) {
     dplyr::ungroup()
   
   # Output dataframe
-  cur_sp <- NA
-  cur_n_sp <- 0
-  n_sp <- length(fit_growth)
-  
   out <- fit_growth %>% 
     purrr::map_depth(
-      5,
+      4,
       function(x) {
 
         # Print current species
-        if (is.na(cur_sp) || cur_sp != x$species) {
-          cur_sp <<- x$species
-          cur_n_sp <<- cur_n_sp + 1
-          message(cur_sp, " - ", cur_n_sp, "/", n_sp)
-        }
+        print(paste("Growth - species", x$species,
+                    "- sample", x$sample))
 
         # Create row
         out_tmp <- data.frame(
@@ -81,7 +74,6 @@ Get_OutputTable_Growth <- function(fit_growth, data_growth) {
 
   # Bind recursively dataframes from the nested output list
   out <- out %>% 
-    purrr::map(~purrr::map(.x, ~purrr::map(.x, ~purrr::map(.x, bind_rows)))) %>% 
     purrr::map(~purrr::map(.x, ~purrr::map(.x, bind_rows))) %>% 
     purrr::map(~purrr::map(.x, bind_rows)) %>% 
     purrr::map(bind_rows) %>% 
