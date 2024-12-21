@@ -13,7 +13,7 @@ options(tidyverse.quiet = TRUE, clustermq.scheduler = "multiprocess")
 
 tar_option_set(packages = c("dplyr", "tidyr", "data.table", "vroom",
                             "foreign", "sp", "terra", "readxl",
-                            "httr", "rgdal", "purrr", "lubridate",
+                            "httr", "purrr", "lubridate",
                             "truncnorm", "RCapsis", "TNRS",
                             "RPostgreSQL", "nlme", "pROC",
                             "stringr", "Hmisc", "FactoMineR", "factoextra"))
@@ -26,42 +26,46 @@ tar_option_set(packages = c("dplyr", "tidyr", "data.table", "vroom",
 # List of targets
 list(
   
+  tar_target(dataserver_path, "S:/"),
+  
   # Forest inventories ----
   
   ## Filtering and harmonizing ----
   
   ### FunDivEUROPE NFIs ----
   
-    # Import trees, plots and species corresp dataset for FUNDIV
+  # Import trees, plots and species corresp dataset for FUNDIV
   tar_target(data_plots_fundiv_raw_fp, "data/NFIs/FunDivEurope/FunDiv_plots_Nadja.csv", format = "file"),
   tar_target(data_plots_fundiv_raw, fread(data_plots_fundiv_raw_fp)),
   tar_target(data_trees_fundiv_raw_fp, "data/NFIs/FunDivEurope/tree.csv", format = "file"),
   tar_target(data_trees_fundiv_raw, fread(data_trees_fundiv_raw_fp)),
   tar_target(data_fundiv_raw, list(plots = data_plots_fundiv_raw, trees = data_trees_fundiv_raw)),
-
+  
   tar_target(data_species_fundiv_fp, "data/NFIs/FunDivEurope/FunDiv_species_Nadja.csv", format = "file"),
   tar_target(data_species_fundiv, fread(data_species_fundiv_fp)),
-
-    # Remove France and germany plots (new NFI harmonization, cf below)
+  
+  # Remove France and germany plots (new NFI harmonization, cf below)
   tar_target(data_fundiv_noGerFra, Remove_FunDiv_country(data_fundiv_raw, c("DE", "FG"))),
-
-    # Get srtm30 altitude of Spanish plots (from true long/lat) and add altitude column
+  
+  # Get srtm30 altitude of Spanish plots (from true long/lat) and add altitude column
   tar_target(coords_spain, Get_Coords_country(data_fundiv_noGerFra, "ES")),
-
+  
   tar_target(coords_spain_srtm30, Find_SRTM30_Tile(coords_spain)),
   tar_target(coords_spain_srtm30_group, coords_spain_srtm30 %>% group_by(srtm30_tile) %>% tar_group(), iteration = "group"),
-
+  
   tar_target(data_srtm30_spain_list, Extract_SRTM30_tile(coords_spain_srtm30_group, unique(coords_spain_srtm30_group$srtm30_tile),
-                                                   folderpath_srtm = "data/syno/SRTM30"), pattern = map(coords_spain_srtm30_group), iteration = "list"),
+                                                         folderpath_srtm = file.path(dataserver_path, "SRTM30")), 
+             pattern = map(coords_spain_srtm30_group), iteration = "list"),
+  
   tar_target(data_srtm30_spain, Merge_SRTM30_List(data_srtm30_spain_list)),
-
+  
   tar_target(data_fundiv_noGerFra_altEsp, Add_Altitude_to_DataPlots(data_fundiv_noGerFra, data_srtm30_spain %>% select(plotcode, altitude = srtm30))),
-
-    # Find and join latin species name in data_tree
+  
+  # Find and join latin species name in data_tree
   tar_target(data_species_fundiv_latinname, Find_LatinName_FunDiv(data_species_fundiv)),
   tar_target(data_fundiv_noGerFra_altEsp_latinname, Add_Latinname_to_DataTrees(data_fundiv_noGerFra_altEsp, data_species_fundiv_latinname %>% select(speciesid = id, latinname), "speciesid")),
-
-    # Harmonize FunDivEUROPE datasets
+  
+  # Harmonize FunDivEUROPE datasets
   tar_target(data_fundiv, Harmonize_Datasets_FunDiv(data_fundiv_noGerFra_altEsp_latinname)),
 
 

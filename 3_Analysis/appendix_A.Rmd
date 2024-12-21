@@ -33,8 +33,8 @@ lapply(list.files("R_report", recursive = TRUE), function(x) source(file.path("R
 ```
 
 ```{r}
-data_samsara <- sapply(c("calib_trees", "calib_plots",
-                         "calib_soil", "calib_climate"),
+data_samsara <- sapply(c("calib_trees", "calib_plots"),
+                         # "calib_soil", "calib_climate"),
                        Get_SamsaraDataset_from_PgAdmin,
                        Sys.getenv("LOGIN"),
                        Sys.getenv("PASSWORD"),
@@ -485,13 +485,38 @@ data_light <- Get_SamsaraDataset_from_PgAdmin("calib_compet",
 ```{r}
 ggplot(data_light %>% drop_na(), aes(y = lci_sd, x = lci_mean)) +
  geom_point(alpha = 0.1) +
- geom_smooth(color = "black") +
+ geom_smooth(color = "salmon") +
  xlim(c(0, 1)) +
  ylim(c(0, 1)) +
  ylab("Standard deviation of estimated lci of equivalent trees") +
  xlab("Mean lci of equivalent trees") +
  theme_minimal()
 ```
+
+```{r}
+data_growth %>%
+  dplyr::left_join(data_light, by = "treecode") %>% 
+  dplyr::filter(species %in% c("Pinus sylvestris", "Quercus petraea", "Fagus sylvatica")) %>%
+  dplyr::mutate(group_light = as.factor((lci_mean*100) %/% 5)) %>%
+  dplyr::group_by(species, group_light) %>%
+  dplyr::summarise(lci_mean = mean(lci_mean),
+                   lciSD_mean = mean(lci_sd),
+                   upper = lci_mean + lciSD_mean,
+                   lower = lci_mean - lciSD_mean) %>% 
+
+  ggplot(aes(y = lci_mean, x = lci_mean)) +
+  facet_wrap(~species) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dotted") +
+  geom_point(color = "salmon") +
+  geom_pointrange(aes(ymin = lower, ymax = upper), color = "black") +
+  theme_minimal() +
+  theme(axis.ticks = element_line(linewidth = 0.6),
+        axis.line = element_line(linewidth = 0.6),
+        panel.grid = element_blank()) +
+  xlab("Mean lci for each class") +
+  ylab("Mean lci for each class")
+```
+
 
 
 # Links between variables

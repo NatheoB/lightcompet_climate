@@ -13,7 +13,7 @@ lapply(grep("R$", list.files("R", recursive = TRUE), value = TRUE),
 options(tidyverse.quiet = TRUE, clustermq.scheduler = "multiprocess")
 
 tar_option_set(packages = c("dplyr", "tidyr", "data.table", "vroom",
-                            "purrr", "lubridate", "MuMIn",
+                            "purrr", "lubridate", "MuMIn", "openxlsx2",
                             "truncnorm", "RPostgreSQL", "nlme", "pROC",
                             "stringr", "Hmisc", "FactoMineR", "factoextra"))
 
@@ -116,6 +116,11 @@ list(
   ## Get mean environment dataset ----
   tar_target(data_mean_env, Get_Mean_Env(data_growth)),
   
+  ## Get shade tolerance dataset ----
+  tar_target(data_shadetol, Get_Shadetol("data/data_Niinemets&Valladares_2006.csv",
+                                         "data/data_Poorter_2012.csv",
+                                         species_calib_growth)),
+  
   
   # DATASET OVERVIEW ----
   # tar_target(plots_overview_global,
@@ -178,72 +183,13 @@ list(
   tar_target(out_mortality_fp, Save_Dataframe(out_mortality, "output/out_mortality.csv")),
   
   
+  # CREATE FINAL EXCEL PARAMETER FILE ----
+  tar_target(out_final_file, Create_Final_File(out_growth, out_mortality,
+                                               data_growth_scaled$attr,
+                                               data_mortality_scaled$attr,
+                                               data_mean_env,
+                                               data_shadetol,
+                                               output_fp = "output/output_params.xlsx")),
   
-  # tar_target(fit_growth, Fit_Growth(sp = species_calib_growth,
-  #                                   data_gr = data_growth,
-  #                                   n_samples = 20,
-  #                                   resampling_weighted_by = c("dbh", "aet2pet", "sgdd"),
-  #                                   prop_resampling = 0.8,
-  #                                   n_folds = 5,
-  #                                   use_dredge = TRUE,
-  #                                   get_only_coefs = TRUE,
-  #                                   compet_type = c("lci"),
-  #                                   seed = 38),
-  #            pattern = map(species_calib_growth),
-  #            iteration = "list"),
-  # 
-  # tar_target(fit_mortality, Fit_Mortality(sp = species_calib_mortality,
-  #                                         data_morta = data_mortality,
-  #                                         n_samples = 20,
-  #                                         resampling_weighted_by = c("dbh", "aet2pet", "sgdd"),
-  #                                         prop_resampling = 0.8,
-  #                                         n_folds = 5,
-  #                                         use_dredge = TRUE,
-  #                                         get_only_coefs = TRUE,
-  #                                         compet_type = c("lci"),
-  #                                         seed = 38),
-  #            pattern = map(species_calib_mortality),
-  #            iteration = "list"),
-  
-  
-  # GET OUTPUT TABLES ----
-  # tar_target(out_growth, Get_OutputTable_Growth(fit_growth, data_growth)),
-  # tar_target(out_mortality, Get_OutputTable_Mortality(fit_mortality, data_mortality)),
-  # 
-  # 
-  # # CREATE FINAL DATASETS FOR EACH SPECIES ----
-  # tar_target(params_growth_all, Get_Params(out_growth)),
-  # tar_target(params_mortality_all, Get_Params(out_mortality)),
-  # 
-  # tar_target(params_growth_mean, Summarise_Params(params_growth_all)),
-  # tar_target(params_mortality_mean, Summarise_Params(params_mortality_all)),
-  # 
-  # 
-  # # CREATE FINAL DATASETS FOR GROUPS ----
-  # tar_target(data_species_info, vroom("data/samsara/species_info.csv")),
-  # 
-  # tar_target(params_growth_all_groups, Get_Params_Groups(out_growth, data_species_info)),
-  # tar_target(params_mortality_all_groups, Get_Params_Groups(out_mortality, data_species_info)),
-  # 
-  # tar_target(params_growth_mean_groups, Summarise_Params_Groups(params_growth_all_groups)),
-  # tar_target(params_mortality_mean_groups, Summarise_Params_Groups(params_mortality_all_groups)),
-  # 
-  # 
-  # # SAVE DATASETS ----
-  # tar_target(out_growth_fp, Save_Dataframe(out_growth, "output/out_growth.csv")),
-  # tar_target(out_mortality_fp, Save_Dataframe(out_mortality, "output/out_mortality.csv")),
-  # 
-  # tar_target(params_growth_all_fp, Save_Dataframe(params_growth_all, "output/params_growth_all.csv")),
-  # tar_target(params_mortality_all_fp, Save_Dataframe(params_mortality_all, "output/params_mortality_all.csv")),
-  # 
-  # tar_target(params_growth_mean_fp, Save_Dataframe(params_growth_mean, "output/params_growth_mean.csv")),
-  # tar_target(params_mortality_mean_fp, Save_Dataframe(params_mortality_mean, "output/params_mortality_mean.csv")),
-  # 
-  # tar_target(params_growth_all_groups_fp, Save_Dataframe(params_growth_all_groups, "output/params_growth_all_groups.csv")),
-  # tar_target(params_mortality_all_groups_fp, Save_Dataframe(params_mortality_all_groups, "output/params_mortality_all_groups.csv")),
-  # 
-  # tar_target(params_growth_mean_groups_fp, Save_Dataframe(params_growth_mean_groups, "output/params_growth_mean_groups.csv")),
-  # tar_target(params_mortality_mean_groups_fp, Save_Dataframe(params_mortality_mean_groups, "output/params_mortality_mean_groups.csv")),
-  # 
   NULL
 )

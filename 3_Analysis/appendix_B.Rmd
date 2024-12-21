@@ -300,7 +300,7 @@ out_growth %>%
         strip.text = element_text(size = 5),
         axis.text.x = element_text(angle = 45, size = 5),
         axis.text.y = element_text(size = 5)) +
-  xlab("Water-availability gradient (aet2pet)") +
+  xlab("Aridity gradient (aet2pet)") +
   ylab("Annual diameter increment in mm")
 ```
 
@@ -419,7 +419,7 @@ out_mortality %>%
         strip.text = element_text(size = 5),
         axis.text.x = element_text(angle = 45, size = 5),
         axis.text.y = element_text(size = 5)) +
-  xlab("Water-availability gradient (aet2pet)") +
+  xlab("Aridity gradient (aet2pet)") +
   ylab("Annual probability of survival")
 ```
 
@@ -482,7 +482,14 @@ out_mortality %>%
 ```
 
 
-# Model predictions (for each species)
+# Model predictions (for some species)
+
+```{r}
+species_ex <- c("Pinus sylvestris", "Fagus sylvatica", 
+                "Abies alba", "Picea abies", "Pinus pinaster",
+                "Quercus ilex")
+```
+
 
 ## aet2pet x lci
 
@@ -561,7 +568,7 @@ data_gr_aet2pet <- out_growth %>%
                                    dplyr::arrange(aet2pet_mean) %>% 
                                    dplyr::pull(species)))
 
-for (sp in c("Pinus sylvestris", "Picea abies", "Fagus sylvatica", "Abies alba")) {
+for (sp in species_ex) {
   
   plot_surv_aet2pet <- data_surv_aet2pet %>% 
     dplyr::filter(species == sp) %>% 
@@ -580,14 +587,16 @@ for (sp in c("Pinus sylvestris", "Picea abies", "Fagus sylvatica", "Abies alba")
           plot.subtitle = element_text(hjust = 0.5),
           strip.text = element_text(size = 5),
           axis.text.x = element_text(angle = 45)) +
-    xlab("water-stress gradient (aet2pet)") +
-    ylab("Annual probability of survival")
+    xlab("Aridity gradient (aet2pet)") +
+    ylab("Annual probability of survival") +
+    ylim(c(0.97, 1)) +
+    xlim(c(0.5, 1))
   
   legend_aet2pet <- get_legend(plot_surv_aet2pet)
   plot_surv_aet2pet <- plot_surv_aet2pet +
     theme(legend.position = "none")
   
- plot_gr_aet2pet <- data_gr_aet2pet %>% 
+  plot_gr_aet2pet <- data_gr_aet2pet %>% 
     dplyr::filter(species == sp) %>% 
     
     ggplot(aes(y = dD, x = x_aet2pet, color = lci_group)) +
@@ -604,8 +613,10 @@ for (sp in c("Pinus sylvestris", "Picea abies", "Fagus sylvatica", "Abies alba")
           plot.subtitle = element_text(hjust = 0.5),
           strip.text = element_text(size = 5),
           axis.text.x = element_text(angle = 45)) +
-    xlab("water-stress gradient (aet2pet)") +
-    ylab("Annual diameter increment in mm")
+    xlab("Aridity gradient (aet2pet)") +
+    ylab("Annual diameter increment in mm") +
+    ylim(c(0, 15)) +
+    xlim(c(0.5, 1))
   
   print(cowplot::plot_grid(
     cowplot::ggdraw() + cowplot::draw_label(sp),
@@ -620,3 +631,139 @@ for (sp in c("Pinus sylvestris", "Picea abies", "Fagus sylvatica", "Abies alba")
 
 
 ## sgdd x lci
+
+
+```{r}
+data_surv_sgdd <- out_mortality %>% 
+  dplyr::right_join(best_mod_morta) %>% 
+  dplyr::filter(type_compet == "lci") %>% 
+  dplyr::select(species, sample, fold, mod_id, submod_id, weight,
+                contains("coef."), 
+                -contains(c("pval", "bal", "bat"))) %>% 
+  dplyr::rename_all(~gsub(".est", "", .)) %>% 
+  replace(is.na(.), 0) %>% 
+  dplyr::left_join(data_mean_env, by = "species") %>% 
+  dplyr::slice(rep(1:n(), each = 100*2)) %>% # 2 lci groups
+  dplyr::group_by(species, sample, fold, mod_id, submod_id) %>%
+  dplyr::mutate(x_sgdd = rep(seq(unique(sgdd_qt1), unique(sgdd_qt9),
+                                    length = 100), 
+                                each = 2),
+
+                lci_group = rep(c("in sun", "in shade"), times = 100),
+                
+                lci_value = case_when(
+                  lci_group == "in sun" ~ 0.1,
+                  lci_group == "in shade" ~ 0.9
+                ),
+                lci_group = factor(lci_group, c("in sun", "in shade"))) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(
+    surv = 1 - predict_mortality(
+      dbh_mean, lci_value, x_sgdd, aet2pet_mean, ., data_growth_scaled$attr)) %>% 
+  dplyr::group_by(species, sample, fold, 
+                  x_sgdd, lci_group) %>% 
+  dplyr::summarise(surv = weighted.mean(surv, weight)) %>% 
+  dplyr::group_by(species, lci_group, x_sgdd) %>% 
+  dplyr::summarise(conf.low = quantile(surv, 0.025),
+                   conf.up = quantile(surv, 0.975),
+                   surv = mean(surv)) %>% 
+  dplyr::mutate(species = factor(species, levels = data_mean_env %>% 
+                                   dplyr::arrange(sgdd_mean) %>% 
+                                   dplyr::pull(species)))
+
+data_gr_sgdd <- out_growth %>% 
+  dplyr::right_join(best_mod_gr) %>% 
+  dplyr::filter(type_compet == "lci") %>% 
+  dplyr::select(species, sample, fold, mod_id, submod_id, weight,
+                contains("coef."), 
+                -contains(c("pval", "bal", "bat"))) %>% 
+  dplyr::rename_all(~gsub(".est", "", .)) %>% 
+  replace(is.na(.), 0) %>% 
+  dplyr::left_join(data_mean_env, by = "species") %>% 
+  dplyr::slice(rep(1:n(), each = 100*2)) %>% # 2 lci groups
+  dplyr::group_by(species, sample, fold, mod_id, submod_id) %>%
+  dplyr::mutate(x_sgdd = rep(seq(unique(sgdd_qt1), unique(sgdd_qt9),
+                                    length = 100), 
+                                each = 2),
+
+                lci_group = rep(c("in sun", "in shade"), times = 100),
+                
+                lci_value = case_when(
+                  lci_group == "in sun" ~ 0.1,
+                  lci_group == "in shade" ~ 0.9
+                ),
+                lci_group = factor(lci_group, c("in sun", "in shade"))) %>% 
+  dplyr::ungroup() %>% 
+  dplyr::mutate(
+    dD = predict_growth(
+      dbh_mean, lci_value, x_sgdd, aet2pet_mean, ., data_growth_scaled$attr)) %>% 
+  dplyr::group_by(species, sample, fold, 
+                  x_sgdd, lci_group) %>% 
+  dplyr::summarise(dD = weighted.mean(dD, weight)) %>% 
+  dplyr::group_by(species, lci_group, x_sgdd) %>% 
+  dplyr::summarise(conf.low = quantile(dD, 0.025),
+                   conf.up = quantile(dD, 0.975),
+                   dD = mean(dD)) %>% 
+  dplyr::mutate(species = factor(species, levels = data_mean_env %>% 
+                                   dplyr::arrange(sgdd_mean) %>% 
+                                   dplyr::pull(species)))
+
+for (sp in species_ex) {
+  
+  plot_surv_sgdd <- data_surv_sgdd %>% 
+    dplyr::filter(species == sp) %>% 
+    
+    ggplot(aes(y = surv, x = x_sgdd, color = lci_group)) +
+    scale_color_manual(values = c("goldenrod1", "#595959")) +
+    geom_ribbon(aes(ymin = conf.low,
+                    ymax = conf.up,
+                    group=lci_group),
+                fill = "gray",
+                color = "gray") + 
+    geom_line(size = 1.05) +
+    theme_minimal() +
+    labs(subtitle = "SURVIVAL") +
+    theme(legend.position = "top",
+          plot.subtitle = element_text(hjust = 0.5),
+          strip.text = element_text(size = 5),
+          axis.text.x = element_text(angle = 45)) +
+    xlab("Temperature gradient (sgdd)") +
+    ylab("Annual probability of survival") +
+    ylim(c(0.97, 1)) +
+    xlim(c(900, 4200))
+  
+  legend_sgdd <- get_legend(plot_surv_sgdd)
+  plot_surv_sgdd <- plot_surv_sgdd +
+    theme(legend.position = "none")
+  
+  plot_gr_sgdd <- data_gr_sgdd %>% 
+    dplyr::filter(species == sp) %>% 
+    
+    ggplot(aes(y = dD, x = x_sgdd, color = lci_group)) +
+    scale_color_manual(values = c("goldenrod1", "#595959")) +
+    geom_ribbon(aes(ymin = conf.low,
+                    ymax = conf.up,
+                    group=lci_group),
+                fill = "gray",
+                color = "gray") + 
+    geom_line(size = 1.05) +
+    theme_minimal() +
+    labs(subtitle = "GROWTH") +
+    theme(legend.position = "none",
+          plot.subtitle = element_text(hjust = 0.5),
+          strip.text = element_text(size = 5),
+          axis.text.x = element_text(angle = 45)) +
+    xlab("Temperature gradient (sgdd)") +
+    ylab("Annual diameter increment in mm") +
+    ylim(c(0, 15)) +
+    xlim(c(900, 4200))
+  
+  print(cowplot::plot_grid(
+    cowplot::ggdraw() + cowplot::draw_label(sp),
+    legend_sgdd,
+    cowplot::plot_grid(plot_gr_sgdd, plot_surv_sgdd, nrow = 1),
+    ncol = 1, rel_heights = c(1, 1, 10)
+  ))
+  
+}
+```

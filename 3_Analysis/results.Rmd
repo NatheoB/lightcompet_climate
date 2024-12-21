@@ -17,6 +17,7 @@ knitr::opts_chunk$set(
 
 ```{r}
 library(vroom)
+library(readxl)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
@@ -32,17 +33,35 @@ library(gtsummary)
 ```
 
 ```{r}
-tar_load(out_growth)
-tar_load(out_mortality)
+output_params_fp <- "../2_Calibration/output/output_params.xlsx"
 
-tar_load(data_growth) # For mean environment
-tar_load(data_mortality)
+out_growth <- readxl::read_excel(output_params_fp, sheet = "params_growth", na = "NA")
+out_mortality <- readxl::read_excel(output_params_fp, sheet = "params_mortality", na = "NA")
 
-tar_load(data_growth_scaled) # for scale data
-tar_load(data_mortality_scaled)
+scale_growth <- readxl::read_excel(output_params_fp, sheet = "scale_growth", na = "NA")
+scale_mortality <- readxl::read_excel(output_params_fp, sheet = "scale_mortality", na = "NA")
+
+data_shadetol <- readxl::read_excel(output_params_fp, sheet = "shade_tolerance", na = "NA")
+
+data_mean_env <- readxl::read_excel(output_params_fp, sheet = "mean_env", na = "NA") %>% 
+  dplyr::arrange(aet2pet_mean) %>% 
+  dplyr::mutate(species = factor(species, levels = species)) %>% 
+  dplyr::filter(!species %in% c("Pinus canariensis", "Pinus radiata"))
 ```
 
 ```{r}
+# Species shade tolerance parameters
+shadetol_limit_low <- 2.25
+shadetol_limit_high <- 3.75
+
+shadetol_low <- 1.5
+shadetol_mid <- 3
+shadetol_high <- 4.5
+```
+
+
+```{r}
+# Best SGDD form for both growth and survival
 best_mod_gr <- out_growth %>% 
   dplyr::group_by(species, sample, fold, mod_id, type_sgdd, type_compet) %>% 
   dplyr::summarize(aic = weighted.mean(aic, weight)) %>% 
@@ -63,69 +82,7 @@ best_mod_morta <- out_mortality %>%
 ```
 
 
-# Species shade tolerance
-
-```{r}
-shadetol_limit_low <- 2.25
-shadetol_limit_high <- 3.75
-
-shadetol_low <- 1.5
-shadetol_mid <- 3
-shadetol_high <- 4.5
-
-data_shadetol_nandm <- vroom("data/data_Niinemets&Valladares_2006.csv", show_col_types = F)
-data_shadetol_poorter <- vroom("data/data_Poorter_2012.csv", show_col_types = F)
-
-# Bind both datasets
-data_shadetol <- dplyr::bind_rows(
-  data_shadetol_nandm %>% 
-    dplyr::select(species = Species, shadetol = shade_tolerance.mean),
-  data_shadetol_poorter %>% 
-    dplyr::filter(species != "Pinus uncinata") # Not the same value as the dataset from Niinemets and Valladares
-) %>% 
-  dplyr::filter(species %in% unique(out_growth$species)) %>% 
-  dplyr::distinct()
-
-# Observe which species are lacking
-setdiff(unique(out_growth$species), data_shadetol$species)
-
-# Add lacking species
-data_shadetol <- data_shadetol %>% 
-  add_row(
-    species = c("Pinus canariensis", "Populus spp.", "Juniperus thurifera", "Tilia spp.", "Salix spp.", "Sorbus spp."),
-    # order = c("gymno", "angio", "gymno", "angio", "angio", "angio"),
-    shadetol = c(1, 
-                 mean(data_shadetol_nandm$shade_tolerance.mean[grep("Populus", data_shadetol_nandm$Species)]),
-                 mean(data_shadetol_nandm$shade_tolerance.mean[grep("Juniperus", data_shadetol_nandm$Species)]),
-                 mean(data_shadetol_nandm$shade_tolerance.mean[grep("Tilia", data_shadetol_nandm$Species)]),
-                 mean(data_shadetol_nandm$shade_tolerance.mean[grep("Salix", data_shadetol_nandm$Species)]),
-                 mean(data_shadetol_nandm$shade_tolerance.mean[grep("Sorbus", data_shadetol_nandm$Species)]))
-  ) %>% 
-  dplyr::arrange(shadetol) %>% 
-  dplyr::mutate(species = factor(species, levels = species)) %>% 
-  dplyr::filter(!species %in% c("Pinus canariensis", "Pinus radiata"))
-```
-
-# Species mean environment
-
-```{r}
-data_mean_env <- data_growth %>% 
-  dplyr::group_by(species) %>% 
-  dplyr::summarise(across(c(dbh, aet2pet, sgdd, climate, lci), 
-                          list("mean" = mean, 
-                               "median" = median,
-                               "qt1" = ~quantile(., 0.1),
-                               "qt9" = ~quantile(., 0.9),
-                               "qt025" = ~quantile(., 0.025),
-                               "qt975" = ~quantile(., 0.975)))) %>% 
-  dplyr::filter(!species %in% c("Pinus canariensis", "Pinus radiata")) %>% 
-  dplyr::arrange(aet2pet_median) %>% 
-  dplyr::mutate(species = factor(species, levels = species))
-```
-
 # Comparison of competition variables
-
-## Per species
 
 ```{r}
 print("GROWTH")
@@ -163,11 +120,6 @@ out_mortality %>%
   dplyr::summarise(n_best_mod = sum(best_mod))
 ```
 
-
-## All species
-
-### Table
-
 ```{r}
 print("GROWTH")
 comp_sp_gr <- out_growth %>% 
@@ -176,22 +128,11 @@ comp_sp_gr <- out_growth %>%
   dplyr::summarize(aic = weighted.mean(aic, weight),
                    mae = weighted.mean(mae, weight),
                    rmse = weighted.mean(rmse, weight)) %>% 
-  dplyr::left_join(data_growth %>% 
-                     dplyr::group_by(species) %>% 
-                     dplyr::summarise(n_ind = n()),
-                   by = "species") %>% 
+  dplyr::left_join(data_mean_env %>% dplyr::select(species, n_ind), by = "species") %>% 
   dplyr::group_by(species, sample, fold) %>% 
   dplyr::mutate(aic_ref = aic[type_compet == "control"],
                 mae_ref = mae[type_compet == "control"],
                 rmse_ref = rmse[type_compet == "control"])
-
-comp_sp_gr %>% 
-  dplyr::group_by(species, type_compet) %>% 
-  dplyr::summarise(aic = mean((aic - aic_ref) / aic_ref)) %>% 
-  dplyr::filter(type_compet %in% c("batXdbh", "lci")) %>% 
-  tidyr::pivot_wider(names_from = "type_compet", values_from = "aic") %>% 
-  dplyr::mutate(lci2bat = lci - batXdbh) %>% 
-  dplyr::arrange(lci2bat)
 
 comp_sp_gr %>% 
   dplyr::group_by(type_compet) %>% 
@@ -207,21 +148,9 @@ comp_sp_morta <- out_mortality %>%
   dplyr::group_by(species, sample, fold, mod_id, type_compet) %>% 
   dplyr::summarize(aic = weighted.mean(aic, weight),
                    auc_roc = weighted.mean(auc_roc, weight)) %>% 
-  dplyr::left_join(data_mortality %>% 
-                     dplyr::group_by(species) %>% 
-                     dplyr::summarise(n_ind = n()),
-                   by = "species") %>% 
+  dplyr::left_join(data_mean_env %>% dplyr::select(species, n_ind), by = "species") %>% 
   dplyr::group_by(species, sample, fold) %>% 
   dplyr::mutate(aic_ref = aic[type_compet == "control"])
-
-
-comp_sp_morta %>% 
-  dplyr::group_by(species, type_compet) %>% 
-  dplyr::summarise(aic = mean((aic - aic_ref) / aic_ref)) %>% 
-  dplyr::filter(type_compet %in% c("batXdbh", "lci")) %>% 
-  tidyr::pivot_wider(names_from = "type_compet", values_from = "aic") %>% 
-  dplyr::mutate(lci2bat = lci - batXdbh) %>% 
-  dplyr::arrange(lci2bat)
 
 comp_sp_morta %>% 
   dplyr::group_by(type_compet) %>% 
@@ -230,9 +159,6 @@ comp_sp_morta %>%
                    auc_roc = mean(auc_roc))
 ```
 
-
-### Plots
-
 ```{r}
 plot_comp_gr <- out_growth %>% 
   dplyr::right_join(best_mod_gr) %>% 
@@ -240,10 +166,7 @@ plot_comp_gr <- out_growth %>%
   dplyr::summarize(aic = weighted.mean(aic, weight),
                    mae = weighted.mean(mae, weight),
                    rmse = weighted.mean(rmse, weight)) %>% 
-  dplyr::left_join(data_growth %>% 
-                     dplyr::group_by(species) %>% 
-                     dplyr::summarise(n_ind = n()),
-                   by = "species") %>% 
+  dplyr::left_join(data_mean_env %>% dplyr::select(species, n_ind), by = "species") %>% 
   dplyr::group_by(type_compet) %>% 
   dplyr::summarise(aic = weighted.mean(aic, 1/n_ind),
                    mae = mean(mae),
@@ -268,10 +191,7 @@ plot_comp_morta <- out_mortality  %>%
   dplyr::group_by(species, sample, fold, mod_id, type_compet) %>% 
   dplyr::summarize(aic = weighted.mean(aic, weight),
                    auc_roc = weighted.mean(auc_roc, weight)) %>% 
-  dplyr::left_join(data_growth %>% 
-                     dplyr::group_by(species) %>% 
-                     dplyr::summarise(n_ind = n()),
-                   by = "species") %>% 
+  dplyr::left_join(data_mean_env %>% dplyr::select(species, n_ind), by = "species") %>% 
   dplyr::group_by(type_compet) %>% 
   dplyr::summarise(aic = weighted.mean(aic, 1/n_ind),
                    auc_roc = mean(auc_roc)) %>% 
@@ -398,7 +318,8 @@ predict_growth <- function(dbh_mm, lci, sgdd, aet2pet, coefs, scales) {
   lci <- (lci - scales$center[scales$var == "lci"]) / scales$scale[scales$var == "lci"]
   
   sgdd_inv <- ((1/sgdd) - scales$center[scales$var == "sgdd_inv"]) / scales$scale[scales$var == "sgdd_inv"]
-  sgdd2 <- ((sgdd - scales$center[scales$var == "sgdd"]) / scales$scale[scales$var == "sgdd"])^2
+  sgdd2 <- ((sgdd - scales$center[scales$var == "sgdd"]) / scales$scale[scales$var == "sgdd"]) ^ 2
+  # We squared the standardization of sgdd and we not used sgdd2 directly here as in the formula, we used poly(sgdd, 2) with sgdd scaled
   sgdd <- (sgdd - scales$center[scales$var == "sgdd"]) / scales$scale[scales$var == "sgdd"]
   
   aet2pet_inv <- ((1/aet2pet) - scales$center[scales$var == "aet2pet_inv"]) / scales$scale[scales$var == "aet2pet_inv"]
@@ -436,7 +357,8 @@ predict_mortality <- function(dbh_mm, lci, sgdd, aet2pet, coefs, scales) {
   lci <- (lci - scales$center[scales$var == "lci"]) / scales$scale[scales$var == "lci"]
   
   sgdd_inv <- ((1/sgdd) - scales$center[scales$var == "sgdd_inv"]) / scales$scale[scales$var == "sgdd_inv"]
-  sgdd2 <- ((sgdd - scales$center[scales$var == "sgdd"]) / scales$scale[scales$var == "sgdd"])^2
+  sgdd2 <- ((sgdd - scales$center[scales$var == "sgdd2"]) / scales$scale[scales$var == "sgdd2"]) ^ 2 
+  # We squared the standardization of sgdd and we not used sgdd2 directly here as in the formula, we used poly(sgdd, 2) with sgdd scaled
   sgdd <- (sgdd - scales$center[scales$var == "sgdd"]) / scales$scale[scales$var == "sgdd"]
   
   aet2pet_inv <- ((1/aet2pet) - scales$center[scales$var == "aet2pet_inv"]) / scales$scale[scales$var == "aet2pet_inv"]
@@ -479,12 +401,11 @@ data_interspe_gr <- out_growth %>%
   dplyr::left_join(data_mean_env, by = "species") %>% 
   dplyr::mutate(
     dD_low = predict_growth(
-      dbh_mean, 0.1, sgdd_mean, aet2pet_mean, ., data_growth_scaled$attr),
+      dbh_mean, 0.1, sgdd_mean, aet2pet_mean, ., scale_growth),
     dD_high = predict_growth(
-      dbh_mean, 0.9, sgdd_mean, aet2pet_mean, ., data_growth_scaled$attr)) %>% 
-  dplyr::mutate(lci_effect = log(dD_low/dD_high)) %>% 
-  dplyr::group_by(species, sample, fold, mod_id, 
-                  aet2pet_median, climate_mean, aet2pet_mean, sgdd_mean) %>% 
+      dbh_mean, 0.9, sgdd_mean, aet2pet_mean, ., scale_growth)) %>% 
+  dplyr::mutate(lci_effect = log(dD_low/dD_high)) %>%
+  dplyr::group_by(species, sample, fold, mod_id, climate_mean, aet2pet_mean, sgdd_mean) %>% 
   dplyr::summarise(lci_effect = weighted.mean(lci_effect, weight),
                    dD_low = weighted.mean(dD_low, weight),
                    dD_high = weighted.mean(dD_high, weight)) %>% 
@@ -506,12 +427,11 @@ data_interspe_morta <- out_mortality %>%
   dplyr::left_join(data_mean_env, by = "species") %>% 
   dplyr::mutate(
     surv_low = 1 - predict_mortality(
-      dbh_mean, 0.1, sgdd_mean, aet2pet_mean, ., data_mortality_scaled$attr),
+      dbh_mean, 0.1, sgdd_mean, aet2pet_mean, ., scale_mortality),
     surv_high = 1 - predict_mortality(
-      dbh_mean, 0.9, sgdd_mean, aet2pet_mean, ., data_mortality_scaled$attr)) %>% 
-  dplyr::mutate(lci_effect = log(surv_low/surv_high)) %>% 
-  dplyr::group_by(species, sample, fold, mod_id, climate_mean, 
-                  aet2pet_mean, sgdd_mean, aet2pet_median) %>% 
+      dbh_mean, 0.9, sgdd_mean, aet2pet_mean, ., scale_mortality)) %>% 
+  dplyr::mutate(lci_effect = log(surv_low/surv_high)) %>%
+  dplyr::group_by(species, sample, fold, mod_id, climate_mean, aet2pet_mean, sgdd_mean) %>% 
   dplyr::summarise(lci_effect = weighted.mean(lci_effect, weight),
                    surv_low = weighted.mean(surv_low, weight),
                    surv_high = weighted.mean(surv_high, weight)) %>% 
@@ -597,6 +517,7 @@ tbl_merge(
   gt::gtsave(filename = "tab_1.tex")
 ```
 
+
 ## Result plot
 
 ### For manuscript
@@ -672,11 +593,11 @@ plot_interspe_gr_mod
 plot_interspe_gr_species <- data_interspe_gr %>% 
   dplyr::group_by(species) %>% 
   dplyr::summarise(lci_effect_mean = mean(lci_effect),
-                   # conf.low = quantile(lci_effect, 0.025),
-                   # conf.up = quantile(lci_effect, 0.975),
-                   tcrit = qt(0.975, df=n()-1),
-                   conf.low = mean(lci_effect) - tcrit*sd(lci_effect)/sqrt(n()),
-                   conf.up = mean(lci_effect) + tcrit*sd(lci_effect)/sqrt(n()),
+                   conf.low = quantile(lci_effect, 0.025),
+                   conf.up = quantile(lci_effect, 0.975),
+                   # tcrit = qt(0.975, df=n()-1),
+                   # conf.low = mean(lci_effect) - tcrit*sd(lci_effect)/sqrt(n()),
+                   # conf.up = mean(lci_effect) + tcrit*sd(lci_effect)/sqrt(n()),
                    aet2pet_mean = mean(aet2pet_mean),
                    shadetol = mean(shadetol)) %>% 
   dplyr::mutate(
@@ -699,22 +620,23 @@ plot_interspe_gr_species <- data_interspe_gr %>%
         axis.line = element_line(linewidth = 0.6),
         panel.grid = element_blank()) +
   ylab(expression(paste("species sensitivity to light competition on growth ", Omega^{growth}))) +
-  xlab("mean species aridity niche") +
+  xlab(expression(paste("mean species aridity niche ", aet2pet[mean]))) +
   labs(color = "species shade tolerance") +
   scale_color_gradient2(midpoint = mean(data_shadetol$shadetol), space = "Lab", 
                         low = "goldenrod1", mid = "orange3", high = "lightsteelblue4") +
-  geom_label(label = "competition",
-             aes(x = 0.585, y = 0.1),
-             color = "black",
-             fill = NA,
-             label.size = 0.1,
-             label.padding = unit(0.1, "lines")) +
-  geom_label(label = "facilitation",
-             aes(x = 0.585, y = -0.1),
-             color = "black",
-             fill = NA,
-             label.size = 0.1,
-             label.padding = unit(0.1, "lines"))
+  ylim(c(-0.07, NA))
+  # geom_label(label = "competition",
+  #            aes(x = 0.58, y = 0.3),
+  #            color = "black",
+  #            fill = NA,
+  #            label.size = 0.1,
+  #            label.padding = unit(0.1, "lines")) +
+  # geom_label(label = "facilitation",
+  #            aes(x = 0.58, y = -0.1),
+  #            color = "black",
+  #            fill = NA,
+  #            label.size = 0.1,
+  #            label.padding = unit(0.1, "lines"))
   # geom_label(label = "DRY",
   #            aes(x = 0.55, y = -0.26),
   #            color = "salmon",
@@ -760,7 +682,7 @@ plot_interspe_surv_mod <- data_interspe_mods %>%
         axis.text = element_text(size = 6),
         panel.grid = element_blank(),
         axis.title = element_blank()) +
-  ylim(-0.03, 0.2) +
+  ylim(-0.008, 0.03) +
   geom_hline(yintercept = 0, linetype = "dashed")
 
 plot_interspe_surv_mod
@@ -770,11 +692,11 @@ plot_interspe_surv_mod
 plot_interspe_morta_species <- data_interspe_morta %>% 
   dplyr::group_by(species, aet2pet_mean) %>% 
   dplyr::summarise(lci_effect_mean = mean(lci_effect),
-                   # conf.low = quantile(lci_effect, 0.025),
-                   # conf.up = quantile(lci_effect, 0.975),
-                   tcrit = qt(0.975, df=n()-1),
-                   conf.low = mean(lci_effect) - tcrit*sd(lci_effect)/sqrt(n()),
-                   conf.up = mean(lci_effect) + tcrit*sd(lci_effect)/sqrt(n()),
+                   conf.low = quantile(lci_effect, 0.025),
+                   conf.up = quantile(lci_effect, 0.975),
+                   # tcrit = qt(0.975, df=n()-1),
+                   # conf.low = mean(lci_effect) - tcrit*sd(lci_effect)/sqrt(n()),
+                   # conf.up = mean(lci_effect) + tcrit*sd(lci_effect)/sqrt(n()),
                    aet2pet_mean = mean(aet2pet_mean),
                    shadetol = mean(shadetol)) %>% 
   dplyr::mutate(
@@ -798,23 +720,24 @@ plot_interspe_morta_species <- data_interspe_morta %>%
         axis.line = element_line(linewidth = 0.6),
         panel.grid = element_blank()) +
   ylab(expression(paste("species sensitivity to light competition on survival ", Omega^{survival}))) +
-  xlab("mean species aridity niche") +
+  xlab(expression(paste("mean species aridity niche ", aet2pet[mean]))) +
   labs(color = "species shade tolerance") +
   scale_color_gradient2(midpoint = mean(data_shadetol$shadetol), space = "Lab", 
                         low = "goldenrod1", mid = "orange3", high = "lightsteelblue4") +
-  geom_label(label = "competition",
-             aes(x = 0.585, y = 0.012),
-             color = "black",
-             fill = NA,
-             label.size = 0.1,
-             label.padding = unit(0.1, "lines")) +
-  geom_label(label = "facilitation",
-             aes(x = 0.585, y = -0.012),
-             color = "black",
-             fill = NA,
-             label.size = 0.1,
-             label.padding = unit(0.1, "lines")) +
-  guides(color = guide_colorbar(title.position="bottom", title.theme = element_text(hjust = 0.5)))
+  guides(color = guide_colorbar(title.position="bottom", title.theme = element_text(hjust = 0.5))) +
+  ylim(c(-0.003, NA))
+  # geom_label(label = "competition",
+  #            aes(x = 0.58, y = 0.015),
+  #            color = "black",
+  #            fill = NA,
+  #            label.size = 0.1,
+  #            label.padding = unit(0.1, "lines")) +
+  # geom_label(label = "facilitation",
+  #            aes(x = 0.58, y = -0.005),
+  #            color = "black",
+  #            fill = NA,
+  #            label.size = 0.1,
+  #            label.padding = unit(0.1, "lines")) +
   # geom_label(label = "DRY",
   #            aes(x = 0.55, y = -0.031),
   #            color = "salmon",
@@ -882,14 +805,21 @@ species_interspe <- data_interspe_gr %>%
 
 species_interspe
 
+data_interspe_morta %>% 
+  dplyr::group_by(species) %>% 
+  dplyr::summarise(lci_effect_mean = mean(lci_effect),
+                   sgdd_mean = mean(sgdd_mean),
+                   aet2pet_mean = mean(aet2pet_mean)) %>% 
+  dplyr::filter(species %in% c("Larix decidua", "Betula pubescens"))
+
 plot_interspe_gr_species <- data_interspe_gr %>% 
   dplyr::group_by(species) %>% 
   dplyr::summarise(lci_effect_mean = mean(lci_effect),
-                   # conf.low = quantile(lci_effect, 0.025),
-                   # conf.up = quantile(lci_effect, 0.975),
-                   tcrit = qt(0.975, df=n()-1),
-                   conf.low = mean(lci_effect) - tcrit*sd(lci_effect)/sqrt(n()),
-                   conf.up = mean(lci_effect) + tcrit*sd(lci_effect)/sqrt(n()),
+                   conf.low = quantile(lci_effect, 0.025),
+                   conf.up = quantile(lci_effect, 0.975),
+                   # tcrit = qt(0.975, df=n()-1),
+                   # conf.low = mean(lci_effect) - tcrit*sd(lci_effect)/sqrt(n()),
+                   # conf.up = mean(lci_effect) + tcrit*sd(lci_effect)/sqrt(n()),
                    aet2pet_mean = mean(aet2pet_mean),
                    shadetol = mean(shadetol)) %>% 
   dplyr::mutate(
@@ -913,33 +843,33 @@ plot_interspe_gr_species <- data_interspe_gr %>%
         axis.line = element_line(linewidth = 0.6),
         panel.grid = element_blank()) +
   ylab(expression(paste("species sensitivity to light competition on growth ", Omega^{growth}))) +
-  xlab("mean species aridity niche") +
+  xlab(expression(paste("mean species aridity niche ", aet2pet[mean]))) +
   labs(color = "species shade tolerance") +
   scale_color_gradient2(midpoint = mean(data_shadetol$shadetol), space = "Lab", 
                         low = "goldenrod1", mid = "orange3", high = "lightsteelblue4") +
-  geom_label(label = "competition",
-             aes(x = 0.585, y = 0.1),
-             color = "black",
-             fill = NA,
-             label.size = 0.1,
-             label.padding = unit(0.1, "lines")) +
-  geom_label(label = "facilitation",
-             aes(x = 0.585, y = -0.1),
-             color = "black",
-             fill = NA,
-             label.size = 0.1,
-             label.padding = unit(0.1, "lines")) +
+  # geom_label(label = "competition",
+  #            aes(x = 0.585, y = 0.1),
+  #            color = "black",
+  #            fill = NA,
+  #            label.size = 0.1,
+  #            label.padding = unit(0.1, "lines")) +
+  # geom_label(label = "facilitation",
+  #            aes(x = 0.585, y = -0.1),
+  #            color = "black",
+  #            fill = NA,
+  #            label.size = 0.1,
+  #            label.padding = unit(0.1, "lines")) +
   geom_text(mapping = aes(label = id), color = "black", size = 2)
 
 
 plot_interspe_morta_species <- data_interspe_morta %>% 
   dplyr::group_by(species, aet2pet_mean) %>% 
   dplyr::summarise(lci_effect_mean = mean(lci_effect),
-                   # conf.low = quantile(lci_effect, 0.025),
-                   # conf.up = quantile(lci_effect, 0.975),
-                   tcrit = qt(0.975, df=n()-1),
-                   conf.low = mean(lci_effect) - tcrit*sd(lci_effect)/sqrt(n()),
-                   conf.up = mean(lci_effect) + tcrit*sd(lci_effect)/sqrt(n()),
+                   conf.low = quantile(lci_effect, 0.025),
+                   conf.up = quantile(lci_effect, 0.975),
+                   # tcrit = qt(0.975, df=n()-1),
+                   # conf.low = mean(lci_effect) - tcrit*sd(lci_effect)/sqrt(n()),
+                   # conf.up = mean(lci_effect) + tcrit*sd(lci_effect)/sqrt(n()),
                    aet2pet_mean = mean(aet2pet_mean),
                    shadetol = mean(shadetol)) %>% 
   dplyr::mutate(
@@ -964,22 +894,22 @@ plot_interspe_morta_species <- data_interspe_morta %>%
         axis.line = element_line(linewidth = 0.6),
         panel.grid = element_blank()) +
   ylab(expression(paste("species sensitivity to light competition on growth ", Omega^{survival}))) +
-  xlab("mean species aridity niche") +
+  xlab(expression(paste("mean species aridity niche ", aet2pet[mean]))) +
   labs(color = "species shade tolerance") +
   scale_color_gradient2(midpoint = mean(data_shadetol$shadetol), space = "Lab", 
                         low = "goldenrod1", mid = "orange3", high = "lightsteelblue4") +
-  geom_label(label = "competition",
-             aes(x = 0.585, y = 0.012),
-             color = "black",
-             fill = NA,
-             label.size = 0.1,
-             label.padding = unit(0.1, "lines")) +
-  geom_label(label = "facilitation",
-             aes(x = 0.585, y = -0.012),
-             color = "black",
-             fill = NA,
-             label.size = 0.1,
-             label.padding = unit(0.1, "lines")) +
+  # geom_label(label = "competition",
+  #            aes(x = 0.585, y = 0.012),
+  #            color = "black",
+  #            fill = NA,
+  #            label.size = 0.1,
+  #            label.padding = unit(0.1, "lines")) +
+  # geom_label(label = "facilitation",
+  #            aes(x = 0.585, y = -0.012),
+  #            color = "black",
+  #            fill = NA,
+  #            label.size = 0.1,
+  #            label.padding = unit(0.1, "lines")) +
   geom_text(mapping = aes(label = id), color = "black", size = 2)
 
 plot_interspe_legend <- cowplot::get_legend(plot_interspe_morta_species)
@@ -1019,31 +949,27 @@ data_intraspe_gr <- out_growth %>%
   dplyr::mutate(
     
     dD_low_dry = predict_growth(
-      dbh_mean, 0.1, sgdd_mean, aet2pet_qt025, ., data_growth_scaled$attr),
+      dbh_mean, 0.1, sgdd_mean, aet2pet_qt025, ., scale_growth),
     dD_high_dry = predict_growth(
-      dbh_mean, 0.9, sgdd_mean, aet2pet_qt025, ., data_growth_scaled$attr),
-    # lci_effect_dry = log(dD_low_dry/dD_high_dry),
+      dbh_mean, 0.9, sgdd_mean, aet2pet_qt025, ., scale_growth),
     lci_effect_dry = dD_low_dry - dD_high_dry,
     
     dD_low_wet = predict_growth(
-      dbh_mean, 0.1, sgdd_mean, aet2pet_qt975, ., data_growth_scaled$attr),
+      dbh_mean, 0.1, sgdd_mean, aet2pet_qt975, ., scale_growth),
     dD_high_wet = predict_growth(
-      dbh_mean, 0.9, sgdd_mean, aet2pet_qt975, ., data_growth_scaled$attr),
-    # lci_effect_wet = log(dD_low_wet/dD_high_wet),
+      dbh_mean, 0.9, sgdd_mean, aet2pet_qt975, ., scale_growth),
     lci_effect_wet = dD_low_wet - dD_high_wet,
     
     dD_low_cold = predict_growth(
-      dbh_mean, 0.1, sgdd_qt025, aet2pet_mean, ., data_growth_scaled$attr),
+      dbh_mean, 0.1, sgdd_qt025, aet2pet_mean, ., scale_growth),
     dD_high_cold = predict_growth(
-      dbh_mean, 0.9, sgdd_qt025, aet2pet_mean, ., data_growth_scaled$attr),
-    # lci_effect_cold = log(dD_low_cold/dD_high_cold),
+      dbh_mean, 0.9, sgdd_qt025, aet2pet_mean, ., scale_growth),
     lci_effect_cold = dD_low_cold - dD_high_cold,
     
     dD_low_hot = predict_growth(
-      dbh_mean, 0.1, sgdd_qt975, aet2pet_mean, ., data_growth_scaled$attr),
+      dbh_mean, 0.1, sgdd_qt975, aet2pet_mean, ., scale_growth),
     dD_high_hot = predict_growth(
-      dbh_mean, 0.9, sgdd_qt975, aet2pet_mean, ., data_growth_scaled$attr),
-    # lci_effect_hot = log(dD_low_hot/dD_high_hot),
+      dbh_mean, 0.9, sgdd_qt975, aet2pet_mean, ., scale_growth),
     lci_effect_hot = dD_low_hot - dD_high_hot
   ) %>% 
   
@@ -1057,7 +983,13 @@ data_intraspe_gr <- out_growth %>%
 
   dplyr::mutate(
     lci_effect_diff_aet2pet = lci_effect_wet - lci_effect_dry,
-    lci_effect_diff_sgdd = lci_effect_hot - lci_effect_cold
+    lci_effect_diff_sgdd = lci_effect_hot - lci_effect_cold,
+    
+    lci_effect_ratio_aet2pet = lci_effect_wet / lci_effect_dry,
+    lci_effect_ratio_sgdd = lci_effect_hot / lci_effect_cold,
+    
+    lci_effect_stdratio_aet2pet = lci_effect_diff_aet2pet / lci_effect_wet,
+    lci_effect_stdratio_sgdd = lci_effect_diff_sgdd / lci_effect_wet
   ) %>% 
   
   dplyr::group_by(species, sample, fold, mod_id) %>% 
@@ -1083,6 +1015,12 @@ data_intraspe_gr <- out_growth %>%
     lci_effect_diff_aet2pet = weighted.mean(lci_effect_diff_aet2pet, weight),
     lci_effect_diff_sgdd = weighted.mean(lci_effect_diff_sgdd, weight),
     
+    lci_effect_ratio_aet2pet = weighted.mean(lci_effect_ratio_aet2pet, weight),
+    lci_effect_ratio_sgdd = weighted.mean(lci_effect_ratio_sgdd, weight),
+    
+    lci_effect_stdratio_aet2pet = weighted.mean(lci_effect_stdratio_aet2pet, weight),
+    lci_effect_stdratio_sgdd = weighted.mean(lci_effect_stdratio_sgdd, weight),
+    
     dD_diff_low_aet2pet = weighted.mean(dD_diff_low_aet2pet, weight),
     dD_diff_high_aet2pet = weighted.mean(dD_diff_high_aet2pet, weight),
     
@@ -1100,38 +1038,43 @@ data_intraspe_gr_mean <- data_intraspe_gr %>%
     signif_aet2pet = t.test(lci_effect_diff_aet2pet, mu = 0)$p.value[[1]],
     signif_sgdd = t.test(lci_effect_diff_sgdd, mu = 0)$p.value[[1]],
     
-    tcrit = qt(0.975, df=n()-1),
+    # tcrit = qt(0.975, df=n()-1),
     
     lci_effect_diff_aet2pet_mean = mean(lci_effect_diff_aet2pet),
-    # conf.low_aet2pet = quantile(lci_effect_diff_aet2pet, 0.025),
-    # conf.up_aet2pet = quantile(lci_effect_diff_aet2pet, 0.975),
-    conf.low_aet2pet = mean(lci_effect_diff_aet2pet) - tcrit*sd(lci_effect_diff_aet2pet)/sqrt(n()),
-    conf.up_aet2pet = mean(lci_effect_diff_aet2pet) + tcrit*sd(lci_effect_diff_aet2pet)/sqrt(n()),
+    lci_effect_ratio_aet2pet_mean = mean(lci_effect_ratio_aet2pet),
+    lci_effect_stdratio_aet2pet_mean = mean(lci_effect_stdratio_aet2pet),
+    
+    conf.low_aet2pet = quantile(lci_effect_diff_aet2pet, 0.025),
+    conf.up_aet2pet = quantile(lci_effect_diff_aet2pet, 0.975),
+    # conf.low_aet2pet = mean(lci_effect_diff_aet2pet) - tcrit*sd(lci_effect_diff_aet2pet)/sqrt(n()),
+    # conf.up_aet2pet = mean(lci_effect_diff_aet2pet) + tcrit*sd(lci_effect_diff_aet2pet)/sqrt(n()),
     
     lci_effect_diff_sgdd_mean = mean(lci_effect_diff_sgdd),
-    # conf.low_sgdd = quantile(lci_effect_diff_sgdd, 0.025),
-    # conf.up_sgdd = quantile(lci_effect_diff_sgdd, 0.975)
-    conf.low_sgdd = mean(lci_effect_diff_sgdd) - tcrit*sd(lci_effect_diff_sgdd)/sqrt(n()),
-    conf.up_sgdd = mean(lci_effect_diff_sgdd) + tcrit*sd(lci_effect_diff_sgdd)/sqrt(n())
+    lci_effect_ratio_sgdd_mean = mean(lci_effect_ratio_sgdd),
+    lci_effect_stdratio_sgdd_mean = mean(lci_effect_stdratio_sgdd),
+    conf.low_sgdd = quantile(lci_effect_diff_sgdd, 0.025),
+    conf.up_sgdd = quantile(lci_effect_diff_sgdd, 0.975)
+    # conf.low_sgdd = mean(lci_effect_diff_sgdd) - tcrit*sd(lci_effect_diff_sgdd)/sqrt(n()),
+    # conf.up_sgdd = mean(lci_effect_diff_sgdd) + tcrit*sd(lci_effect_diff_sgdd)/sqrt(n())
   )  %>% 
   
   dplyr::mutate(
     sign_aet2pet = case_when(
-      signif_aet2pet > 0.05 ~ "no significant",
+      sign(conf.low_aet2pet) != sign(conf.up_aet2pet) ~ "not significant",
       lci_effect_diff_aet2pet_mean > 0 ~ "wet margin",
       lci_effect_diff_aet2pet_mean < 0 ~ "dry margin"
     ),
     sign_sgdd = case_when(
-      signif_sgdd > 0.05 ~ "no significant",
+      sign(conf.low_sgdd) != sign(conf.up_sgdd) ~ "not significant",
       lci_effect_diff_sgdd_mean > 0 ~ "warm margin",
       lci_effect_diff_sgdd_mean < 0 ~ "cold margin"
     ))  %>% 
   dplyr::right_join(data_shadetol, by = "species") %>% 
-  dplyr::add_row(species = c("", "MEAN SPECIES")) %>% 
+  dplyr::add_row(species = c("", "AVERAGE SPECIES RESPONSE")) %>% 
   dplyr::mutate(
-    species = factor(species, levels = c(as.character(data_mean_env$species), "", "MEAN SPECIES")),
-    sign_sgdd = factor(sign_sgdd, levels = c("cold margin", "no significant", "warm margin")),
-    sign_aet2pet = factor(sign_aet2pet, levels = c("dry margin", "no significant", "wet margin")))
+    species = factor(species, levels = c(as.character(data_mean_env$species), "", "AVERAGE SPECIES RESPONSE")),
+    sign_sgdd = factor(sign_sgdd, levels = c("cold margin", "not significant", "warm margin")),
+    sign_aet2pet = factor(sign_aet2pet, levels = c("dry margin", "not significant", "wet margin")))
 
 
 # MORTALITY
@@ -1148,31 +1091,27 @@ data_intraspe_surv <- out_mortality %>%
   dplyr::mutate(
     
     surv_low_dry = 1 - predict_mortality(
-      dbh_mean, 0.1, sgdd_mean, aet2pet_qt025, ., data_growth_scaled$attr),
+      dbh_mean, 0.1, sgdd_mean, aet2pet_qt025, ., scale_mortality),
     surv_high_dry = 1 - predict_mortality(
-      dbh_mean, 0.9, sgdd_mean, aet2pet_qt025, ., data_growth_scaled$attr),
-    # lci_effect_dry = log(surv_low_dry/surv_high_dry),
+      dbh_mean, 0.9, sgdd_mean, aet2pet_qt025, ., scale_mortality),
     lci_effect_dry = surv_low_dry - surv_high_dry,
     
     surv_low_wet = 1 - predict_mortality(
-      dbh_mean, 0.1, sgdd_mean, aet2pet_qt975, ., data_growth_scaled$attr),
+      dbh_mean, 0.1, sgdd_mean, aet2pet_qt975, ., scale_mortality),
     surv_high_wet = 1 - predict_mortality(
-      dbh_mean, 0.9, sgdd_mean, aet2pet_qt975, ., data_growth_scaled$attr),
-    # lci_effect_wet = log(surv_low_wet/surv_high_wet),
+      dbh_mean, 0.9, sgdd_mean, aet2pet_qt975, ., scale_mortality),
     lci_effect_wet = surv_low_wet - surv_high_wet,
     
     surv_low_cold = 1 - predict_mortality(
-      dbh_mean, 0.1, sgdd_qt025, aet2pet_mean, ., data_growth_scaled$attr),
+      dbh_mean, 0.1, sgdd_qt025, aet2pet_mean, ., scale_mortality),
     surv_high_cold = 1 - predict_mortality(
-      dbh_mean, 0.9, sgdd_qt025, aet2pet_mean, ., data_growth_scaled$attr),
-    # lci_effect_cold = log(surv_low_cold/surv_high_cold),
+      dbh_mean, 0.9, sgdd_qt025, aet2pet_mean, ., scale_mortality),
     lci_effect_cold = surv_low_cold - surv_high_cold,
     
     surv_low_hot = 1 - predict_mortality(
-      dbh_mean, 0.1, sgdd_qt975, aet2pet_mean, ., data_growth_scaled$attr),
+      dbh_mean, 0.1, sgdd_qt975, aet2pet_mean, ., scale_mortality),
     surv_high_hot = 1 - predict_mortality(
-      dbh_mean, 0.9, sgdd_qt975, aet2pet_mean, ., data_growth_scaled$attr),
-    # lci_effect_hot = log(surv_low_hot/surv_high_hot),
+      dbh_mean, 0.9, sgdd_qt975, aet2pet_mean, ., scale_mortality),
     lci_effect_hot = surv_low_hot - surv_high_hot
   )  %>% 
   
@@ -1186,7 +1125,13 @@ data_intraspe_surv <- out_mortality %>%
 
   dplyr::mutate(
     lci_effect_diff_aet2pet = lci_effect_wet - lci_effect_dry,
-    lci_effect_diff_sgdd = lci_effect_hot - lci_effect_cold
+    lci_effect_diff_sgdd = lci_effect_hot - lci_effect_cold,
+    
+    lci_effect_ratio_aet2pet = lci_effect_wet / lci_effect_dry,
+    lci_effect_ratio_sgdd = lci_effect_hot / lci_effect_cold,
+    
+    lci_effect_stdratio_aet2pet = lci_effect_diff_aet2pet / lci_effect_wet,
+    lci_effect_stdratio_sgdd = lci_effect_diff_sgdd / lci_effect_wet
   ) %>% 
   
   dplyr::group_by(species, sample, fold, mod_id) %>% 
@@ -1212,6 +1157,12 @@ data_intraspe_surv <- out_mortality %>%
     lci_effect_diff_aet2pet = weighted.mean(lci_effect_diff_aet2pet, weight),
     lci_effect_diff_sgdd = weighted.mean(lci_effect_diff_sgdd, weight),
     
+    lci_effect_ratio_aet2pet = weighted.mean(lci_effect_ratio_aet2pet, weight),
+    lci_effect_ratio_sgdd = weighted.mean(lci_effect_ratio_sgdd, weight),
+    
+    lci_effect_stdratio_aet2pet = weighted.mean(lci_effect_stdratio_aet2pet, weight),
+    lci_effect_stdratio_sgdd = weighted.mean(lci_effect_stdratio_sgdd, weight),
+    
     surv_diff_low_aet2pet = weighted.mean(surv_diff_low_aet2pet, weight),
     surv_diff_high_aet2pet = weighted.mean(surv_diff_high_aet2pet, weight),
     
@@ -1229,38 +1180,44 @@ data_intraspe_surv_mean <- data_intraspe_surv %>%
     signif_sgdd = t.test(lci_effect_diff_sgdd, mu = 0)$p.value[[1]],
     
     # tcrit = qt(0.975, df=n()-1),
-    tcrit = 1.96,
+    # tcrit = 1.96,
     
     lci_effect_diff_aet2pet_mean = mean(lci_effect_diff_aet2pet),
-    # conf.low_aet2pet = quantile(lci_effect_diff_aet2pet, 0.025),
-    # conf.up_aet2pet = quantile(lci_effect_diff_aet2pet, 0.975),
-    conf.low_aet2pet = mean(lci_effect_diff_aet2pet) - tcrit*sd(lci_effect_diff_aet2pet)/sqrt(n()),
-    conf.up_aet2pet = mean(lci_effect_diff_aet2pet) + tcrit*sd(lci_effect_diff_aet2pet)/sqrt(n()),
+    lci_effect_ratio_aet2pet_mean = mean(lci_effect_ratio_aet2pet),
+    lci_effect_stdratio_aet2pet_mean = mean(lci_effect_stdratio_aet2pet),
+    
+    conf.low_aet2pet = quantile(lci_effect_diff_aet2pet, 0.025),
+    conf.up_aet2pet = quantile(lci_effect_diff_aet2pet, 0.975),
+    # conf.low_aet2pet = mean(lci_effect_diff_aet2pet) - tcrit*sd(lci_effect_diff_aet2pet)/sqrt(n()),
+    # conf.up_aet2pet = mean(lci_effect_diff_aet2pet) + tcrit*sd(lci_effect_diff_aet2pet)/sqrt(n()),
     
     lci_effect_diff_sgdd_mean = mean(lci_effect_diff_sgdd),
-    # conf.low_sgdd = quantile(lci_effect_diff_sgdd, 0.025),
-    # conf.up_sgdd = quantile(lci_effect_diff_sgdd, 0.975)
-    conf.low_sgdd = mean(lci_effect_diff_sgdd) - tcrit*sd(lci_effect_diff_sgdd)/sqrt(n()),
-    conf.up_sgdd = mean(lci_effect_diff_sgdd) + tcrit*sd(lci_effect_diff_sgdd)/sqrt(n())
+    lci_effect_ratio_sgdd_mean = mean(lci_effect_ratio_sgdd),
+    lci_effect_stdratio_sgdd_mean = mean(lci_effect_stdratio_sgdd),
+    
+    conf.low_sgdd = quantile(lci_effect_diff_sgdd, 0.025),
+    conf.up_sgdd = quantile(lci_effect_diff_sgdd, 0.975)
+    # conf.low_sgdd = mean(lci_effect_diff_sgdd) - tcrit*sd(lci_effect_diff_sgdd)/sqrt(n()),
+    # conf.up_sgdd = mean(lci_effect_diff_sgdd) + tcrit*sd(lci_effect_diff_sgdd)/sqrt(n())
   )  %>% 
   
   dplyr::mutate(
     sign_aet2pet = case_when(
-      signif_aet2pet > 0.05 ~ "no significant",
+      sign(conf.low_aet2pet) != sign(conf.up_aet2pet) ~ "not significant",
       lci_effect_diff_aet2pet_mean > 0 ~ "wet margin",
       lci_effect_diff_aet2pet_mean < 0 ~ "dry margin"
     ),
     sign_sgdd = case_when(
-      signif_sgdd > 0.05 ~ "no significant",
+      sign(conf.low_sgdd) != sign(conf.up_sgdd) ~ "not significant",
       lci_effect_diff_sgdd_mean > 0 ~ "warm margin",
       lci_effect_diff_sgdd_mean < 0 ~ "cold margin"
     ))  %>% 
   dplyr::right_join(data_shadetol, by = "species") %>% 
-  dplyr::add_row(species = c("", "MEAN SPECIES")) %>% 
+  dplyr::add_row(species = c("", "AVERAGE SPECIES RESPONSE")) %>% 
   dplyr::mutate(
-    species = factor(species, levels = c(as.character(data_mean_env$species), "", "MEAN SPECIES")),
-    sign_sgdd = factor(sign_sgdd, levels = c("cold margin", "no significant", "warm margin")),
-    sign_aet2pet = factor(sign_aet2pet, levels = c("dry margin", "no significant", "wet margin")))
+    species = factor(species, levels = c(as.character(data_mean_env$species), "", "AVERAGE SPECIES RESPONSE")),
+    sign_sgdd = factor(sign_sgdd, levels = c("cold margin", "not significant", "warm margin")),
+    sign_aet2pet = factor(sign_aet2pet, levels = c("dry margin", "not significant", "wet margin")))
 ```
 
 ## Is the effect of light competition greater within the unstressed margin of the species ?
@@ -1400,50 +1357,54 @@ print(paste0("Average difference in light competition effect on tree annual surv
              "between hot and cold margins"))
 
 
-data_intraspe_gr_mean[data_intraspe_gr_mean$species == "MEAN SPECIES", 
+data_intraspe_gr_mean[data_intraspe_gr_mean$species == "AVERAGE SPECIES RESPONSE", 
                       c("lci_effect_diff_aet2pet_mean", "conf.low_aet2pet", "conf.up_aet2pet", "sign_aet2pet")] <- 
   list(
     mods_intraspe_mean[mods_intraspe_mean$dyn == "gr" & mods_intraspe_mean$climate == "aet2pet", "mean"],
     mods_intraspe_mean[mods_intraspe_mean$dyn == "gr" & mods_intraspe_mean$climate == "aet2pet", "conf.low"],
     mods_intraspe_mean[mods_intraspe_mean$dyn == "gr" & mods_intraspe_mean$climate == "aet2pet", "conf.up"],
     ifelse(mods_intraspe_mean[mods_intraspe_mean$dyn == "gr" & mods_intraspe_mean$climate == "aet2pet", "pval"] > 0.05,
-           "no significant",
+           "not significant",
            ifelse(mods_intraspe_mean[mods_intraspe_mean$dyn == "gr" & mods_intraspe_mean$climate == "aet2pet", "mean"] > 0,
-                  "wet margin", "dry margin")))
+                  "wet margin", "dry margin"))
+    )
   
-data_intraspe_gr_mean[data_intraspe_gr_mean$species == "MEAN SPECIES", 
+data_intraspe_gr_mean[data_intraspe_gr_mean$species == "AVERAGE SPECIES RESPONSE", 
                       c("lci_effect_diff_sgdd_mean", "conf.low_sgdd", "conf.up_sgdd", "sign_sgdd")] <- 
   list(
     mods_intraspe_mean[mods_intraspe_mean$dyn == "gr" & mods_intraspe_mean$climate == "sgdd", "mean"],
     mods_intraspe_mean[mods_intraspe_mean$dyn == "gr" & mods_intraspe_mean$climate == "sgdd", "conf.low"],
     mods_intraspe_mean[mods_intraspe_mean$dyn == "gr" & mods_intraspe_mean$climate == "sgdd", "conf.up"],
     ifelse(mods_intraspe_mean[mods_intraspe_mean$dyn == "gr" & mods_intraspe_mean$climate == "sgdd", "pval"] > 0.05,
-           "no significant",
+           "not significant",
            ifelse(mods_intraspe_mean[mods_intraspe_mean$dyn == "gr" & mods_intraspe_mean$climate == "sgdd", "mean"] > 0,
-                  "warm margin", "cold margin")))
+                  "warm margin", "cold margin"))
+    )
 
 
-data_intraspe_surv_mean[data_intraspe_surv_mean$species == "MEAN SPECIES", 
+data_intraspe_surv_mean[data_intraspe_surv_mean$species == "AVERAGE SPECIES RESPONSE", 
                       c("lci_effect_diff_aet2pet_mean", "conf.low_aet2pet", "conf.up_aet2pet", "sign_aet2pet")] <- 
   list(
     mods_intraspe_mean[mods_intraspe_mean$dyn == "surv" & mods_intraspe_mean$climate == "aet2pet", "mean"],
     mods_intraspe_mean[mods_intraspe_mean$dyn == "surv" & mods_intraspe_mean$climate == "aet2pet", "conf.low"],
     mods_intraspe_mean[mods_intraspe_mean$dyn == "surv" & mods_intraspe_mean$climate == "aet2pet", "conf.up"],
     ifelse(mods_intraspe_mean[mods_intraspe_mean$dyn == "surv" & mods_intraspe_mean$climate == "aet2pet", "pval"] > 0.05,
-           "no significant",
+           "not significant",
            ifelse(mods_intraspe_mean[mods_intraspe_mean$dyn == "surv" & mods_intraspe_mean$climate == "aet2pet", "mean"] > 0,
-                  "wet margin", "dry margin")))
+                  "wet margin", "dry margin"))
+    )
   
-data_intraspe_surv_mean[data_intraspe_surv_mean$species == "MEAN SPECIES", 
+data_intraspe_surv_mean[data_intraspe_surv_mean$species == "AVERAGE SPECIES RESPONSE", 
                       c("lci_effect_diff_sgdd_mean", "conf.low_sgdd", "conf.up_sgdd", "sign_sgdd")] <- 
   list(
     mods_intraspe_mean[mods_intraspe_mean$dyn == "surv" & mods_intraspe_mean$climate == "sgdd", "mean"],
     mods_intraspe_mean[mods_intraspe_mean$dyn == "surv" & mods_intraspe_mean$climate == "sgdd", "conf.low"],
     mods_intraspe_mean[mods_intraspe_mean$dyn == "surv" & mods_intraspe_mean$climate == "sgdd", "conf.up"],
     ifelse(mods_intraspe_mean[mods_intraspe_mean$dyn == "surv" & mods_intraspe_mean$climate == "sgdd", "pval"] > 0.05,
-           "no significant",
+           "not significant",
            ifelse(mods_intraspe_mean[mods_intraspe_mean$dyn == "surv" & mods_intraspe_mean$climate == "sgdd", "mean"] > 0,
-                  "warm margin", "cold margin")))
+                  "warm margin", "cold margin"))
+    )
 
 
 # PLOTS
@@ -1451,16 +1412,16 @@ plot_intraspe_gr_aet2pet <-
   ggplot(data = data_intraspe_gr_mean, 
          mapping = aes(y = species, x = lci_effect_diff_aet2pet_mean, color = sign_aet2pet)) +
   geom_vline(xintercept = 0) +
-  geom_vline(xintercept = data_intraspe_gr_mean$lci_effect_diff_aet2pet_mean[data_intraspe_gr_mean$species == "MEAN SPECIES"],
+  geom_vline(xintercept = data_intraspe_gr_mean$lci_effect_diff_aet2pet_mean[data_intraspe_gr_mean$species == "AVERAGE SPECIES RESPONSE"],
              linetype = "dotted",
              linewidth = 0.8,
-             colour = ifelse(data_intraspe_gr_mean$lci_effect_diff_aet2pet_mean[data_intraspe_gr_mean$species == "MEAN SPECIES"] > 0,
+             colour = ifelse(data_intraspe_gr_mean$lci_effect_diff_aet2pet_mean[data_intraspe_gr_mean$species == "AVERAGE SPECIES RESPONSE"] > 0,
                              "olivedrab3", "salmon")) +
-  geom_point(size=0.6,alpha=0.6) +
+  geom_point(size=0.1,alpha=0.6) +
   geom_pointrange(aes(xmin = conf.low_aet2pet, xmax = conf.up_aet2pet)) +
   scale_y_discrete(position = "right") +
   labs(title = "GROWTH") +
-  xlab("Difference in light competition effect on tree annual growth (in mm)\nbetween the species' wet and dry margins                         ") +
+  xlab("Difference in light competition effect on tree annual growth (in mm)\nbetween the species' wet and dry margins") +
   theme_minimal() +
   theme(legend.position = "none",
         axis.title.y = element_blank(),
@@ -1485,16 +1446,16 @@ plot_intraspe_gr_sgdd <-
   ggplot(data = data_intraspe_gr_mean, 
          mapping = aes(y = species, x = lci_effect_diff_sgdd_mean, color = sign_sgdd)) +
   geom_vline(xintercept = 0) +
-  geom_vline(xintercept = data_intraspe_gr_mean$lci_effect_diff_sgdd_mean[data_intraspe_gr_mean$species == "MEAN SPECIES"],
+  geom_vline(xintercept = data_intraspe_gr_mean$lci_effect_diff_sgdd_mean[data_intraspe_gr_mean$species == "AVERAGE SPECIES RESPONSE"],
              linetype = "dotted",
              linewidth = 0.8,
-             colour = ifelse(data_intraspe_gr_mean$lci_effect_diff_sgdd_mean[data_intraspe_gr_mean$species == "MEAN SPECIES"] > 0,
+             colour = ifelse(data_intraspe_gr_mean$lci_effect_diff_sgdd_mean[data_intraspe_gr_mean$species == "AVERAGE SPECIES RESPONSE"] > 0,
                              "#F1895C", "#82CEF9")) +
-  geom_point(size=0.6,alpha=0.6) +
+  geom_point(size=0.1,alpha=0.6) +
   geom_pointrange(aes(xmin = conf.low_sgdd, xmax = conf.up_sgdd)) +
   scale_y_discrete(position = "right") +
   labs(title = "GROWTH") +
-  xlab("Difference in light competition effect on tree annual growth (in mm)\nbetween the species' warm and cold margins                         ") +
+  xlab("Difference in light competition effect on tree annual growth (in mm)\nbetween the species' warm and cold margins") +
   theme_minimal() +
   theme(legend.position = "none",
         axis.title.y = element_blank(),
@@ -1515,20 +1476,19 @@ plot_intraspe_gr_sgdd <-
 # plot_intraspe_gr_sgdd <- plot_intraspe_gr_sgdd + theme(legend.position = "none")
 
 
-
 plot_intraspe_surv_aet2pet <- 
   ggplot(data = data_intraspe_surv_mean, 
          mapping = aes(y = species, x = lci_effect_diff_aet2pet_mean, color = sign_aet2pet)) +
   geom_vline(xintercept = 0) +
-  geom_vline(xintercept = data_intraspe_surv_mean$lci_effect_diff_aet2pet_mean[data_intraspe_surv_mean$species == "MEAN SPECIES"],
+  geom_vline(xintercept = data_intraspe_surv_mean$lci_effect_diff_aet2pet_mean[data_intraspe_surv_mean$species == "AVERAGE SPECIES RESPONSE"],
              linetype = "dotted",
              linewidth = 0.8,
-             colour = ifelse(data_intraspe_surv_mean$lci_effect_diff_aet2pet_mean[data_intraspe_surv_mean$species == "MEAN SPECIES"] > 0,
+             colour = ifelse(data_intraspe_surv_mean$lci_effect_diff_aet2pet_mean[data_intraspe_surv_mean$species == "AVERAGE SPECIES RESPONSE"] > 0,
                              "olivedrab3", "salmon")) +
-  geom_point(size=0.6,alpha=0.6) +
+  geom_point(size=0.1,alpha=0.6) +
   geom_pointrange(aes(xmin = conf.low_aet2pet, xmax = conf.up_aet2pet)) +
   labs(title = "SURVIVAL") +
-  xlab("Difference in light competition effect on tree annual survival\nbetween the species' wet and dry margins                         ") +
+  xlab("Difference in light competition effect on tree annual survival\nbetween the species' wet and dry margins") +
   theme_minimal() +
   theme(legend.position = "none",
         axis.title.y = element_blank(),
@@ -1540,9 +1500,14 @@ plot_intraspe_surv_aet2pet <-
         axis.text.y = element_blank(),
         plot.title = element_text(hjust = 0.5)) +
   scale_color_manual(values=c("salmon", "gray", "olivedrab3")) +
-  # xlim(c(min(min(data_intraspe_surv_mean$conf.low_aet2pet, na.rm = T), min(data_intraspe_surv_mean$conf.low_sgdd, na.rm = T)),
-  xlim(c(-0.2,
-         max(max(data_intraspe_surv_mean$conf.up_aet2pet, na.rm = T), max(data_intraspe_surv_mean$conf.up_sgdd, na.rm = T))))
+  xlim(c(
+    min(
+      min(data_intraspe_surv_mean$conf.low_aet2pet, na.rm = T), 
+      min(data_intraspe_surv_mean$conf.low_sgdd, na.rm = T)),
+    max(
+      max(data_intraspe_surv_mean$conf.up_aet2pet, na.rm = T),
+      max(data_intraspe_surv_mean$conf.up_sgdd, na.rm = T))
+  ))
 
 
 
@@ -1550,15 +1515,15 @@ plot_intraspe_surv_sgdd <-
   ggplot(data = data_intraspe_surv_mean, 
          mapping = aes(y = species, x = lci_effect_diff_sgdd_mean, color = sign_sgdd)) +
   geom_vline(xintercept = 0) +
-  geom_vline(xintercept = data_intraspe_surv_mean$lci_effect_diff_sgdd_mean[data_intraspe_surv_mean$species == "MEAN SPECIES"],
+  geom_vline(xintercept = data_intraspe_surv_mean$lci_effect_diff_sgdd_mean[data_intraspe_surv_mean$species == "AVERAGE SPECIES RESPONSE"],
              linetype = "dotted",
              linewidth = .8,
-             colour = ifelse(data_intraspe_surv_mean$lci_effect_diff_sgdd_mean[data_intraspe_surv_mean$species == "MEAN SPECIES"] > 0,
+             colour = ifelse(data_intraspe_surv_mean$lci_effect_diff_sgdd_mean[data_intraspe_surv_mean$species == "AVERAGE SPECIES RESPONSE"] > 0,
                              "#F1895C", "#82CEF9")) +
-  geom_point(size=0.6,alpha=0.6) +
+  geom_point(size=0.1,alpha=0.6) +
   geom_pointrange(aes(xmin = conf.low_sgdd, xmax = conf.up_sgdd)) +
   labs(title = "SURVIVAL") +
-  xlab("Difference in light competition effect on tree annual survival\nbetween the species' warm and cold margins                         ") +
+  xlab("Difference in light competition effect on tree annual survival\nbetween the species' warm and cold margins") +
   theme_minimal() +
   theme(legend.position = "none",
         axis.title.y = element_blank(),
@@ -1571,15 +1536,99 @@ plot_intraspe_surv_sgdd <-
         plot.title = element_text(hjust = 0.5),
         plot.subtitle = element_blank()) +
   scale_color_manual(values=c("#82CEF9", "gray", "#F1895C")) +
-  xlim(c(-0.2,
-         max(max(data_intraspe_surv_mean$conf.up_aet2pet, na.rm = T), max(data_intraspe_surv_mean$conf.up_sgdd, na.rm = T))))
+  xlim(c(
+    min(
+      min(data_intraspe_surv_mean$conf.low_aet2pet, na.rm = T), 
+      min(data_intraspe_surv_mean$conf.low_sgdd, na.rm = T)),
+    max(
+      max(data_intraspe_surv_mean$conf.up_aet2pet, na.rm = T),
+      max(data_intraspe_surv_mean$conf.up_sgdd, na.rm = T))
+  ))
+
+
+limit_x_range_surv <- 0.1
+data_intraspe_surv_mean <- data_intraspe_surv_mean %>% 
+  dplyr::mutate(conf.up_aet2pet_capped = pmin(conf.up_aet2pet, limit_x_range_surv),
+                conf.up_sgdd_capped = pmin(conf.up_sgdd, limit_x_range_surv),
+                is_capped_aet2pet = conf.up_aet2pet > limit_x_range_surv,
+                is_capped_sgdd = conf.up_sgdd > limit_x_range_surv,
+                capped_symbol_aet2pet = if_else(is_capped_aet2pet, "---", ""),
+                capped_symbol_sgdd = if_else(is_capped_sgdd, "---", ""))
+
+plot_intraspe_surv_aet2pet_capped <- 
+  ggplot(data = data_intraspe_surv_mean, 
+         mapping = aes(y = species, x = lci_effect_diff_aet2pet_mean, color = sign_aet2pet)) +
+  geom_vline(xintercept = 0) +
+  geom_vline(xintercept = data_intraspe_surv_mean$lci_effect_diff_aet2pet_mean[data_intraspe_surv_mean$species == "AVERAGE SPECIES RESPONSE"],
+             linetype = "dotted",
+             linewidth = 0.8,
+             colour = ifelse(data_intraspe_surv_mean$lci_effect_diff_aet2pet_mean[data_intraspe_surv_mean$species == "AVERAGE SPECIES RESPONSE"] > 0,
+                             "olivedrab3", "salmon")) +
+  geom_point(size=0.1,alpha=0.6) +
+  geom_pointrange(aes(xmin = conf.low_aet2pet, xmax = conf.up_aet2pet_capped)) +
+  geom_text(aes(x = limit_x_range_surv, label = capped_symbol_aet2pet)) +
+  labs(title = "SURVIVAL") +
+  xlab("Difference in light competition effect on tree annual survival\nbetween the species' wet and dry margins") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 7),
+        axis.text.x = element_text(size = 7),
+        axis.ticks.x = element_line(linewidth = 0.6),
+        axis.line.x = element_line(linewidth = 0.6),
+        panel.grid = element_blank(),
+        axis.text.y = element_blank(),
+        plot.title = element_text(hjust = 0.5)) +
+  scale_color_manual(values=c("salmon", "gray", "olivedrab3")) +
+  # xlim(c(min(min(data_intraspe_surv_mean$conf.low_aet2pet, na.rm = T), min(data_intraspe_surv_mean$conf.low_sgdd, na.rm = T)),
+  xlim(c(
+    min(
+      min(data_intraspe_surv_mean$conf.low_aet2pet, na.rm = T), 
+      min(data_intraspe_surv_mean$conf.low_sgdd, na.rm = T)),
+    limit_x_range_surv))
+         # max(max(data_intraspe_surv_mean$conf.up_aet2pet, na.rm = T), max(data_intraspe_surv_mean$conf.up_sgdd, na.rm = T))))
+
+
+
+plot_intraspe_surv_sgdd_capped <- 
+  ggplot(data = data_intraspe_surv_mean, 
+         mapping = aes(y = species, x = lci_effect_diff_sgdd_mean, color = sign_sgdd)) +
+  geom_vline(xintercept = 0) +
+  geom_vline(xintercept = data_intraspe_surv_mean$lci_effect_diff_sgdd_mean[data_intraspe_surv_mean$species == "AVERAGE SPECIES RESPONSE"],
+             linetype = "dotted",
+             linewidth = .8,
+             colour = ifelse(data_intraspe_surv_mean$lci_effect_diff_sgdd_mean[data_intraspe_surv_mean$species == "AVERAGE SPECIES RESPONSE"] > 0,
+                             "#F1895C", "#82CEF9")) +
+  geom_point(size=0.1,alpha=0.6) +
+  geom_pointrange(aes(xmin = conf.low_sgdd, xmax = conf.up_sgdd_capped)) +
+  geom_text(aes(x = limit_x_range_surv, label = capped_symbol_sgdd)) +
+  labs(title = "SURVIVAL") +
+  xlab("Difference in light competition effect on tree annual survival\nbetween the species' warm and cold margins") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 7),
+        axis.text.x = element_text(size = 7),
+        axis.ticks.x = element_line(linewidth = 0.6),
+        axis.line.x = element_line(linewidth = 0.6),
+        panel.grid = element_blank(),
+        axis.text.y = element_blank(),
+        plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_blank()) +
+  scale_color_manual(values=c("#82CEF9", "gray", "#F1895C")) +
+  xlim(c(
+    min(
+      min(data_intraspe_surv_mean$conf.low_aet2pet, na.rm = T), 
+      min(data_intraspe_surv_mean$conf.low_sgdd, na.rm = T)),
+    limit_x_range_surv))
+         # max(max(data_intraspe_surv_mean$conf.up_aet2pet, na.rm = T), max(data_intraspe_surv_mean$conf.up_sgdd, na.rm = T))))
 
 
 # GET SPECIES PLOT
 plot_intraspe_sp <- ggplot(data_mean_env %>% 
-                             dplyr::add_row(species = c("", "MEAN SPECIES")) %>% 
+                             dplyr::add_row(species = c("", "AVERAGE SPECIES RESPONSE")) %>% 
                              dplyr::mutate(species = factor(species, level = species)), 
-                           aes(y = species, x = aet2pet_median)) +
+                           aes(y = species, x = aet2pet_mean)) +
   theme_minimal() +
   xlab(" \n ") +
   labs(title = " ", subtitle = "") +
@@ -1598,12 +1647,13 @@ legend_intraspe_sgdd <- get_legend(
            dplyr::mutate(sign_sgdd = case_when(
              sign_sgdd == "cold margin" ~ "the species' cold margin",
              sign_sgdd == "warm margin" ~ "the species' warm margin",
-             sign_sgdd == "no significant" ~ "not significant"
-           )),
+             sign_sgdd == "not significant" ~ "not significant"
+           ),
+           sign_sgdd = factor(sign_sgdd, levels = c("the species' cold margin", "the species' warm margin", "not significant"))),
          mapping = aes(y = species, x = lci_effect_diff_sgdd_mean, color = sign_sgdd)) +
     geom_point(size = 3) +
     theme_minimal() +
-    scale_color_manual(values=c("#82CEF9", "gray", "#F1895C")) +
+    scale_color_manual(values=c("#82CEF9", "#F1895C", "gray")) +
     theme(legend.position = "top") +
     guides(color = guide_legend(title = "light competition effect is greater in :",
                                 title.theme = element_text(vjust = 0, size = 11),
@@ -1614,15 +1664,17 @@ legend_intraspe_sgdd <- get_legend(
 legend_intraspe_aet2pet <- get_legend(
   ggplot(data = data_intraspe_surv_mean %>% 
            tidyr::drop_na() %>% 
-           dplyr::mutate(sign_aet2pet = case_when(
-             sign_aet2pet == "dry margin" ~ "the species' dry margin",
-             sign_aet2pet == "wet margin" ~ "the species' wet margin",
-             sign_aet2pet == "no significant" ~ "not significant"
-           )),
+           dplyr::mutate(
+             sign_aet2pet = case_when(
+               sign_aet2pet == "dry margin" ~ "the species' dry margin",
+               sign_aet2pet == "wet margin" ~ "the species' wet margin",
+               sign_aet2pet == "not significant" ~ "not significant"
+             ),
+             sign_aet2pet = factor(sign_aet2pet, levels = c("the species' dry margin", "the species' wet margin", "not significant"))),
          mapping = aes(y = species, x = lci_effect_diff_aet2pet_mean, color = sign_aet2pet)) +
     geom_point(size = 3) +
     theme_minimal() +
-    scale_color_manual(values=c("salmon", "gray", "olivedrab3")) +
+    scale_color_manual(values=c("salmon", "olivedrab3", "gray")) +
     theme(legend.position = "top") +
     guides(color = guide_legend(title = "light competition effect is greater in :",
                                 title.theme = element_text(vjust = 0, size = 11),
@@ -1630,7 +1682,28 @@ legend_intraspe_aet2pet <- get_legend(
                                 title.position = "top", title.hjust=0.5))
 )
 
-# FINAL PLOTS
+# FINAL PLOTS - CAPPED (for manuscript)
+cowplot::plot_grid(
+  cowplot::ggdraw() + cowplot::draw_label("Temperature gradient (sgdd)", size = 14, fontface = "bold"),
+  legend_intraspe_sgdd,
+  cowplot::plot_grid(
+    plot_intraspe_gr_sgdd, NULL, plot_intraspe_sp, NULL, plot_intraspe_surv_sgdd_capped,
+    nrow = 1, rel_widths = c(15, 1, 3, 1, 15)
+  ),
+  ncol = 1, rel_heights = c(1, 3, 15)
+)
+
+cowplot::plot_grid(
+  cowplot::ggdraw() + cowplot::draw_label("Aridity gradient (aet2pet)", size = 14, fontface = "bold"),
+  legend_intraspe_aet2pet,
+  cowplot::plot_grid(
+    plot_intraspe_gr_aet2pet, NULL, plot_intraspe_sp, NULL, plot_intraspe_surv_aet2pet_capped,
+    nrow = 1, rel_widths = c(15, 1, 3, 1, 15)
+  ),
+  ncol = 1, rel_heights = c(1, 3, 15)
+)
+
+# FINAL PLOTS - UNCAPPED (FOR APPENDIX)
 cowplot::plot_grid(
   cowplot::ggdraw() + cowplot::draw_label("Temperature gradient (sgdd)", size = 14, fontface = "bold"),
   legend_intraspe_sgdd,
@@ -1642,7 +1715,7 @@ cowplot::plot_grid(
 )
 
 cowplot::plot_grid(
-  cowplot::ggdraw() + cowplot::draw_label("Water-availability gradient (aet2pet)", size = 14, fontface = "bold"),
+  cowplot::ggdraw() + cowplot::draw_label("Aridity gradient (aet2pet)", size = 14, fontface = "bold"),
   legend_intraspe_aet2pet,
   cowplot::plot_grid(
     plot_intraspe_gr_aet2pet, NULL, plot_intraspe_sp, NULL, plot_intraspe_surv_aet2pet,
@@ -1651,6 +1724,7 @@ cowplot::plot_grid(
   ncol = 1, rel_heights = c(1, 3, 15)
 )
 ```
+
 
 
 ## Difference of growth and survival between margins ?
@@ -1931,17 +2005,17 @@ plot_gr_pisy_sgdd <- out_growth %>%
                                     length = 100), 
                                 each = 2),
 
-                lci_group = rep(c("in sun", "in shade"), times = 100),
+                lci_group = rep(c("in light", "in shade"), times = 100),
                 
                 lci_value = case_when(
-                  lci_group == "in sun" ~ 0.1,
+                  lci_group == "in light" ~ 0.1,
                   lci_group == "in shade" ~ 0.9
                 ),
-                lci_group = factor(lci_group, c("in sun", "in shade"))) %>% 
+                lci_group = factor(lci_group, c("in light", "in shade"))) %>% 
   dplyr::ungroup() %>% 
   dplyr::mutate(
     dD = predict_growth(
-      dbh_mean, lci_value, x_sgdd, aet2pet_mean, ., data_growth_scaled$attr)) %>% 
+      dbh_mean, lci_value, x_sgdd, aet2pet_mean, ., scale_growth)) %>% 
   dplyr::group_by(species, sample, fold, 
                   x_sgdd, lci_group) %>% 
   dplyr::summarise(dD = weighted.mean(dD, weight)) %>% 
@@ -1994,17 +2068,17 @@ plot_surv_pisy_sgdd <- out_mortality %>%
                                     length = 100), 
                                 each = 2),
 
-                lci_group = rep(c("in sun", "in shade"), times = 100),
+                lci_group = rep(c("in light", "in shade"), times = 100),
                 
                 lci_value = case_when(
-                  lci_group == "in sun" ~ 0.1,
+                  lci_group == "in light" ~ 0.1,
                   lci_group == "in shade" ~ 0.9
                 ),
-                lci_group = factor(lci_group, c("in sun", "in shade"))) %>% 
+                lci_group = factor(lci_group, c("in light", "in shade"))) %>% 
   dplyr::ungroup() %>% 
   dplyr::mutate(
     surv = 1 - predict_mortality(
-      dbh_mean, lci_value, x_sgdd, aet2pet_mean, ., data_growth_scaled$attr)) %>% 
+      dbh_mean, lci_value, x_sgdd, aet2pet_mean, ., scale_mortality)) %>% 
   dplyr::group_by(sample, fold, 
                   x_sgdd, lci_group) %>% 
   dplyr::summarise(surv = weighted.mean(surv, weight)) %>% 
@@ -2034,8 +2108,8 @@ plot_surv_pisy_sgdd <- out_mortality %>%
         axis.title.y = element_text(size = 9)) +
   xlab("sgdd") +
   ylab("annual survival") +
-  scale_y_continuous(limits = c(0.945, 1),
-                     breaks = seq(1, 0.95, by = -0.01)) +
+  scale_y_continuous(limits = c(0.988, 1),
+                     breaks = seq(0.988, 1, by = 0.002)) +
   scale_x_continuous(limits = c(1000, 2600),
                      breaks = seq(1000, 2500, by = 500))
 
@@ -2057,17 +2131,17 @@ plot_gr_pisy_aet2pet <- out_growth %>%
                                     length = 100), 
                                 each = 2),
 
-                lci_group = rep(c("in sun", "in shade"), times = 100),
+                lci_group = rep(c("in light", "in shade"), times = 100),
                 
                 lci_value = case_when(
-                  lci_group == "in sun" ~ 0.1,
+                  lci_group == "in light" ~ 0.1,
                   lci_group == "in shade" ~ 0.9
                 ),
-                lci_group = factor(lci_group, c("in sun", "in shade"))) %>% 
+                lci_group = factor(lci_group, c("in light", "in shade"))) %>% 
   dplyr::ungroup() %>% 
   dplyr::mutate(
     dD = predict_growth(
-      dbh_mean, lci_value, sgdd_mean, x_aet2pet, ., data_growth_scaled$attr)) %>% 
+      dbh_mean, lci_value, sgdd_mean, x_aet2pet, ., scale_growth)) %>% 
   dplyr::group_by(species, sample, fold, 
                   x_aet2pet, lci_group) %>% 
   dplyr::summarise(dD = weighted.mean(dD, weight)) %>% 
@@ -2117,17 +2191,17 @@ plot_surv_pisy_aet2pet <- out_mortality %>%
                                     length = 100), 
                                 each = 2),
 
-                lci_group = rep(c("in sun", "in shade"), times = 100),
+                lci_group = rep(c("in light", "in shade"), times = 100),
                 
                 lci_value = case_when(
-                  lci_group == "in sun" ~ 0.1,
+                  lci_group == "in light" ~ 0.1,
                   lci_group == "in shade" ~ 0.9
                 ),
-                lci_group = factor(lci_group, c("in sun", "in shade"))) %>% 
+                lci_group = factor(lci_group, c("in light", "in shade"))) %>% 
   dplyr::ungroup() %>% 
   dplyr::mutate(
     surv = 1 - predict_mortality(
-      dbh_mean, lci_value, sgdd_mean, x_aet2pet, ., data_growth_scaled$attr)) %>% 
+      dbh_mean, lci_value, sgdd_mean, x_aet2pet, ., scale_growth)) %>% 
   dplyr::group_by(sample, fold, 
                   x_aet2pet, lci_group) %>% 
   dplyr::summarise(surv = weighted.mean(surv, weight)) %>% 
@@ -2157,14 +2231,14 @@ plot_surv_pisy_aet2pet <- out_mortality %>%
         axis.title.y = element_text(size = 9)) +
   xlab("aet2pet") +
   ylab("annual survival") +
-  scale_y_continuous(limits = c(0.945, 1),
-                     breaks = seq(1, 0.95, by = -0.01)) +
+  scale_y_continuous(limits = c(0.988, 1),
+                     breaks = seq(0.988, 1, by = 0.002)) +
   scale_x_continuous(limits = c(0.78, 1),
                      breaks = seq(0.8, 1, by = 0.05))
 
 # FINAL PLOT
 cowplot::plot_grid(
-  ggdraw() + draw_label("Species generalisation", fontface = "bold"),
+  ggdraw() + draw_label("Average species response", fontface = "bold"),
   cowplot::plot_grid(
     plot_intraspe_grouped_gr, plot_intraspe_grouped_surv,
     nrow = 1),

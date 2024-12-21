@@ -14,7 +14,7 @@ Prepare_MortalityDataset <- function(dataset_global,
                                      sp_to_remove) {
   
   # Filter by treestatus ----
-  data_mortality <- Filter_Dataset_by_Treestatus(dataset_global, c(2, 4, 5))
+  data_mortality <- Filter_Dataset_by_Treestatus(dataset_global, c(2, 4))
   
   
   # Remove country with not enough living individuals for each species ----
